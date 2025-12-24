@@ -1,0 +1,150 @@
+import { Button, ListView, Palette } from "std-widgets.slint";
+import { GenerationActions } from "generator.slint";
+export struct TopicDialogLine {
+    substituted_line: string,
+    clean_line: string,
+    can_play: bool
+}
+
+export struct TopicListItem {
+    topic_name: string,
+    dialog_lines: [TopicDialogLine]
+}
+
+export global Audio {
+    callback play_dialog(int, int);
+}
+
+component TopicListItemView inherits VerticalLayout {
+    in-out property <TopicListItem> item;
+    in-out property <bool> expanded: false;
+    callback expand_clicked();
+    callback generate_audio(int);
+    callback play_audio(int);
+
+    Rectangle {
+        height: 30px;
+        background: Palette.alternate-background;
+        HorizontalLayout {
+            Button {
+                text: expanded ? "collapse" : "expand";
+                clicked => {expand_clicked()}
+            }
+            Text {
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                text: item.topic-name;
+                color: Palette.alternate-foreground;
+            }
+        }
+    }
+
+    ListView {
+        min-height: 0px;
+        visible: expanded;
+        vertical-stretch: expanded ? 1.0 : 0.0;
+        for dLine[i] in item.dialog_lines: HorizontalLayout {
+            padding: 4px;
+            if dLine.can_play: Button {
+                colorize-icon: true;
+                icon: @image-url("assets/play.svg");
+                text: "play";
+                clicked => {
+                    root.play_audio(i);
+                }
+            }
+
+            if !dLine.can_play: Button {
+                colorize-icon: true;
+                icon: @image-url("assets/audio-lines.svg");
+                text: "generate";
+                clicked => {generate_audio(i)}
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                Text{
+                    color: Palette.foreground;
+                    overflow: elide;
+                    text: dLine.substituted_line;
+                }
+                Text{
+                    color: Palette.foreground.transparentize(0.6);
+                    overflow: elide;
+                    text: dLine.clean_line;
+                }
+            }
+
+            if dLine.can_play: Button {
+                // to keep it out of the scrollbar
+                colorize-icon: true;
+                icon: @image-url("assets/redo.svg");
+                text: "regenerate";
+                clicked => {generate_audio(i)}
+            }
+        }
+    }
+}
+
+export component TopicList inherits VerticalLayout {
+    in-out property <[TopicListItem]> model: [
+        {
+            topic_name: "topic 1",
+            dialog_lines: [
+                {
+                    substituted_line: "1a",
+                    clean_line: "1b"
+                },
+                {
+                    substituted_line: "2a",
+                    clean_line: "2b"
+                }
+            ]
+        },
+        {
+            topic_name: "topic 2",
+            dialog_lines: [
+                {
+                    substituted_line: "1a",
+                    clean_line: "1b"
+                },
+                {
+                    substituted_line: "2a",
+                    clean_line: "2b"
+                }
+            ]
+        }
+    ];
+    property <int> expanded_index: -1;
+
+    // one is selected
+    if expanded_index >= 0 && expanded_index < model.length: TopicListItemView {
+        item: model[expanded_index];
+        expanded: true;
+        expand_clicked => {
+            expanded_index = -1
+        }
+        play_audio(line_no) => {
+            debug("playing dialogue");
+            Audio.play_dialog(expanded_index,line_no)
+        }
+        generate_audio(line_no) => {
+            debug("generating");
+            GenerationActions.generate_dialogue(expanded_index, line_no)
+        }
+    }
+
+    // one is not selected
+    if expanded_index < 0 || expanded_index >= model.length: Rectangle {
+        VerticalLayout {
+            alignment: start;
+            for data[i] in model: TopicListItemView {
+               item: data;
+               expanded: false;
+               expand_clicked => {
+                   expanded_index = i
+               }
+           }
+        }
+    }
+}

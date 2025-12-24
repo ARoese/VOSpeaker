@@ -1,0 +1,86 @@
+import { ScrollView, Slider, Button } from "std-widgets.slint";
+component CfgSlider inherits VerticalLayout {
+    in-out property<float> value;
+    in property<string> name;
+    callback value-changed(float);
+    Text {text: name; horizontal-alignment: center;}
+    HorizontalLayout {
+    preferred-height: 20px;
+        Text {
+            vertical-alignment: center;
+            text: value.to-fixed(2);
+        }
+        Slider {
+            value <=> value;
+            changed value => {value-changed(value)}
+            minimum: 0.0;
+            maximum: 1.0;
+            step: 0.05;
+        }
+    }
+}
+
+export global GenerationActions {
+    callback generate_dialogue(int, int);
+    callback mass_generate_dialogue(regen_stale: bool);
+}
+
+export global FilePicking {
+    pure callback format_path(string) -> string;
+    pure callback pick_wav_file(previous: string) -> string;
+}
+
+export struct ChatterboxConfig {
+    temperature: float,
+    cfg_weight: float,
+    exaggeration: float,
+    endpoint: string,
+    voicePath: string
+}
+
+export component ChatterboxConfigView inherits VerticalLayout {
+    in-out property <ChatterboxConfig> config;
+
+    in-out property <float> temperature: 0.5;
+    in-out property <float> cfg_weight: 0.5;
+    in-out property <float> exaggeration: 0.5;
+    in-out property <string> endpoint: "localhost:9005";
+    in-out property <string> voicePath: "/path/to/voice";
+
+    Text {text: "Chatterbox Generator";}
+    ScrollView {
+        VerticalLayout {
+            alignment: start;
+            TextInput {
+                text: config.endpoint;
+                accessible-placeholder-text: "localhost:9005";
+                changed text => {config.endpoint = self.text}
+            }
+            CfgSlider {
+                name: "Temperature";
+                value: config.temperature;
+                value-changed(v) => {config.temperature = v}
+            }
+            CfgSlider {
+                name: "cfg_weight";
+                value: config.cfg_weight;
+                value-changed(v) => {config.cfg_weight = v}
+            }
+            CfgSlider {
+                name: "exaggeration";
+                value: config.exaggeration;
+                value-changed(v) => {config.exaggeration = v}
+            }
+            VerticalLayout {
+                Button {
+                    text: "Voice Reference";
+                    clicked => {config.voicePath = FilePicking.pick_wav_file(config.voicePath)}
+                }
+                if config.voicePath != "": Text {
+                    text: FilePicking.format_path(config.voicePath);
+                }
+            }
+
+        }
+    }
+}

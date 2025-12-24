@@ -1,0 +1,52 @@
+import { Button, HorizontalBox, ListView, ScrollView, Slider, SpinBox, Palette, VerticalBox, CheckBox } from "std-widgets.slint";
+import { ChatterboxConfigView, ChatterboxConfig, GenerationActions, FilePicking } from "generator.slint";
+import { TopicList, TopicListItem, Audio } from "topics.slint";
+import { Progress, ProgressDisplay, ProgressActions } from "progress.slint";
+export  { Audio, GenerationActions, FilePicking, ProgressActions }
+
+export component AppWindow inherits Window {
+    in-out property <[TopicListItem]> topicListModel;
+    in-out property <ChatterboxConfig> genConfig;
+    in-out property <Progress> progress;
+    title: "VOSpeaker";
+    preferred-width: 800px;
+    preferred-height: 600px;
+    Rectangle {
+        background: Palette.background;
+        VerticalLayout {
+            HorizontalBox {
+                vertical-stretch: 1;
+
+                ChatterboxConfigView {
+                    config <=> genConfig;
+                    width: 30%;
+                }
+                TopicList {
+                    model <=> topicListModel;
+                }
+            }
+
+            if progress.active: ProgressDisplay {
+                vertical-stretch: 0;
+                progress <=> progress;
+            }
+
+            property <bool> regen_stale;
+            if !progress.active: HorizontalLayout {
+
+                Text {
+                    text: "Mass generation";
+                    horizontal-stretch: 0;
+                }
+                CheckBox {
+                    checked <=> regen_stale;
+                }
+                Button {
+                    horizontal-stretch: 0;
+                    text: "Mass Generation";
+                    clicked => {GenerationActions.mass_generate_dialogue(regen_stale)}
+                }
+            }
+        }
+    }
+}

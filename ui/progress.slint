@@ -1,0 +1,28 @@
+import { HorizontalBox, ProgressIndicator, Button } from "std-widgets.slint";
+export struct Progress {
+    active: bool,
+    indeterminate: bool,
+    progress_percent: float,
+    text: string
+}
+
+export global ProgressActions {
+    callback cancel();
+}
+
+export component ProgressDisplay inherits HorizontalBox {
+    in property <Progress> progress;
+
+    Button {
+        text: "Cancel";
+        clicked => {ProgressActions.cancel()}
+    }
+    ProgressIndicator {
+        progress: progress.progress_percent;
+        indeterminate: progress.indeterminate;
+    }
+    Text {
+        vertical-alignment: center;
+        text: progress.text;
+    }
+}

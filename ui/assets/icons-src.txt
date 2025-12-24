@@ -1,0 +1,4 @@
+https://composables.com/icons/
+https://composables.com/icons/icon-libraries/font-awesome/play
+https://composables.com/icons/icon-libraries/lucide/audio-lines
+https://composables.com/icons/icon-libraries/font-awesome/redo
