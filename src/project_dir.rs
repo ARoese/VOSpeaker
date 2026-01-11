@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{Error, ErrorKind};
 use std::error::Error as ErrorTrait;
 use std::path::{Path, PathBuf};
+use crate::chatterbox_generator::ChatterboxGeneratorConfig;
 use crate::topic_dir::TopicDir;
 use crate::topic_lines::TopicExpansionConfig;
 
@@ -52,6 +53,19 @@ impl ProjectDir {
         let expansions_string = toml::to_string(&config)?;
         let expansions_path = self.path.join(Self::EXPANSIONS_CONF_NAME);
         Ok(fs::write(&expansions_path, expansions_string)?)
+    }
+
+    const CHATTERBOX_CONFIG_NAME: &str = "chatterbox-generator-config.toml";
+    pub fn load_chatterbox_config(&self) -> Result<ChatterboxGeneratorConfig, Box<dyn ErrorTrait>> {
+        let expansions_path = self.path.join(Self::CHATTERBOX_CONFIG_NAME);
+        let chatterbox_text = fs::read_to_string(&expansions_path)?;
+        Ok(toml::from_str::<ChatterboxGeneratorConfig>(&chatterbox_text)?)
+    }
+
+    pub fn save_chatterbox_config(&self, config: ChatterboxGeneratorConfig) -> Result<(), Box<dyn ErrorTrait>> {
+        let chatterbox_text = toml::to_string(&config)?;
+        let chatterbox_path = self.path.join(Self::CHATTERBOX_CONFIG_NAME);
+        Ok(fs::write(&chatterbox_path, chatterbox_text)?)
     }
 }
 

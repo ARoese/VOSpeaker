@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::hashes::{ConfigHash};
 use crate::dialog_generator::{ConfigHashable, DialogGenerationError, DialogGenerator};
 use md5::Context;
+use slint::ToSharedString;
 use tokio::net::TcpStream;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::io::BufStream;
@@ -41,6 +42,20 @@ impl TryFrom<ChatterboxConfig> for ChatterboxGeneratorConfig{
             cfg_weight: value.cfg_weight,
             exaggeration: value.exaggeration,
             voice_path: PathBuf::from(value.voicePath.to_string()),
+        })
+    }
+}
+
+impl TryFrom<ChatterboxGeneratorConfig> for ChatterboxConfig {
+    type Error = ();
+    
+    fn try_from(value: ChatterboxGeneratorConfig) -> Result<Self, Self::Error> {
+        Ok(ChatterboxConfig {
+            cfg_weight: value.cfg_weight,
+            endpoint: value.endpoint.to_shared_string(),
+            exaggeration: value.exaggeration,
+            temperature: value.temperature,
+            voicePath: value.voice_path.to_string_lossy().to_shared_string(),
         })
     }
 }
