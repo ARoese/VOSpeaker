@@ -18,7 +18,7 @@ use crate::dialog_generator::{ConfigHashable, DialogGenerator};
 use crate::models::{MassGenerationOptions, TopicModel};
 use crate::progress::ProgressState::{Done, Inflight};
 use crate::progress::ProgressVal::{Determinate, Indeterminate};
-use crate::progress::ProgressHandle;
+use crate::progress::{ProgressHandle, ProgressState};
 use crate::project_dir::ProjectDir;
 use async_compat::Compat;
 use rodio::Sink;
@@ -32,6 +32,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use lazy_regex::regex;
+use tokio::sync::watch::Sender;
 use tokio::sync::watch;
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
@@ -202,71 +203,52 @@ fn handle_substitution_change(weak_ui: Weak<AppWindow>) -> HashMap<String, Strin
     substitutions
 }
 
-fn init_generation(ui_weak: Weak<AppWindow>, options: MassGenerationOptions) {
-    
-}
-
-fn main() -> Result<(), Box<dyn Error>> {
-    let ui = AppWindow::new()?;
-
-    let project_dir = ProjectDir::new(
-        &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test_assets/VOSpeaker_test_project")
-    )?;
-
-    let expand_config = Rc::new(TopicExpansionConfig::default());
-    let substitutions = Rc::new(HashMap::<String, String>::default());
-    let topic_dirs = project_dir.topics
-        .into_iter().map(|topic_dir|
-            TopicListItem{
-                topic_name: topic_dir.name().into(),
-                dialog_lines: ModelRc::new(TopicModel::new(topic_dir, (*substitutions).clone(), (*expand_config).clone())),
-            }
-        ).collect::<Vec<_>>();
-    let topics_model = VecModel::from(topic_dirs);
-    // TODO: load expansions from disk
-    let expansions_vec2 = topics_model.iter()
-        .flat_map(|topic| topic.dialog_lines.as_any().downcast_ref::<TopicModel>().unwrap().collect_globals())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .map(|x| {
-            Expansion {
-                name: x.to_shared_string(),
-                substitutions: ModelRc::new(VecModel::from(vec!["1", "2", "3"].iter().map(|x| x.to_shared_string()).collect::<Vec<_>>()))
-            }
-        })
-        .collect::<Vec<_>>();
-    let expansions_model = ModelRc::new(VecModel::from(expansions_vec2));
-    ui.set_expansions(expansions_model.clone());
-    handle_expansion_change(ui.as_weak());
-
-    ui.global::<Mappings>().on_expansion_changed({
-        let weak = ui.as_weak();
-        move |index, new_expansions| {
-            if let Some(old_expansion) = expansions_model.row_data(index as usize){
-                expansions_model.set_row_data(index as usize, Expansion {
-                    name: old_expansion.name,
-                    substitutions: new_expansions
-                });
-                expansions_model.iter().for_each(|i| i.substitutions.iter().for_each(|i2| println!("{:?}", i2)));
-                handle_expansion_change(weak.clone());
-            }
+fn init_generation(ui: &AppWindow, progress_sender: &Sender<ProgressState>, cancellation_token: &Rc<RefCell<CancellationToken>>) {
+    ui.global::<GenerationActions>().on_generate_dialogue({
+        let ui_weak = ui.as_weak();
+        let sender = progress_sender.clone();
+        let ct = cancellation_token.clone();
+        move |topic_idx, line_idx| {
+            generate_dialogue_action(
+                ui_weak.clone(),
+                ProgressHandle{ progress_sender: sender.clone(), cancellation: ct.borrow().clone() },
+                topic_idx, line_idx
+            );
         }
     });
 
-    ui.set_topicListModel(ModelRc::new(topics_model));
-    ui.global::<FilePicking>().on_pick_wav_file(pick_wav_file);
-    ui.global::<FilePicking>().on_format_path(format_path);
-    ui.set_genConfig(ChatterboxConfig{
-        cfg_weight: 0.5,
-        endpoint: "localhost:9005".into(), // TODO: leave this default when done testing
-        exaggeration: 0.5,
-        temperature: 0.5,
-        voicePath: Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test_assets/female-khajiit.wav")
-            .to_string_lossy().into_owned().into(), // TODO: leave this as default when done testing
-    });
+    ui.global::<GenerationActions>().on_mass_generate_dialogue({
+        let ui_weak = ui.as_weak();
+        let sender = progress_sender.clone();
+        let ct = cancellation_token.clone();
+        move |regen_stale| {
+            let current_config: Option<ChatterboxGeneratorConfig> = ui_weak
+                .upgrade()
+                .map(|inner| inner.get_genConfig().try_into().ok())
+                .flatten();
 
+            if let Some(current_config) = current_config {
+                let options = MassGenerationOptions {
+                    current_config_hash: if regen_stale {
+                        Some(current_config.config_hash())
+                    }else{
+                        None
+                    }
+                };
+
+                batch_generate_dialogue_action(
+                    ui_weak.clone(),
+                    ProgressHandle{
+                        progress_sender: sender.clone(),
+                        cancellation: ct.borrow().clone() },
+                    options,
+                );
+            }
+        }
+    });
+}
+
+fn init_receivers(ui: &AppWindow) -> (Sender<ProgressState>, Rc<RefCell<CancellationToken>>) {
     let (progress_sender, mut progress_receiver) = watch::channel(Done);
     let cancellation_token = Rc::new(RefCell::new(CancellationToken::new()));
 
@@ -303,6 +285,56 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }).expect("failed to start progress watcher");
 
+    (progress_sender, cancellation_token)
+}
+
+fn init_dialogue_audio(ui: &AppWindow) {
+    ui.global::<Audio>().on_play_dialog({
+        let ui_weak = ui.as_weak();
+        let stream_handle = rodio::OutputStreamBuilder::open_default_stream()
+            .expect("open default audio stream");
+        let shared_sink  = Cell::<Option<Sink>>::default();
+        move |topic_idx, line_idx| {
+            || -> Option<()> // lets me use ? for early return
+                {
+                    let path = ui_weak.upgrade()?
+                        .get_topicListModel()
+                        .row_data(topic_idx as usize)?
+                        .dialog_lines
+                        .as_any().downcast_ref::<TopicModel>()
+                        .expect("Topic model was not custom type")
+                        .audio_path(line_idx as usize)?;
+                    println!("Attempting to play audio {topic_idx}:{line_idx} at {}", path.display());
+
+                    // Play the sound directly on the device
+                    let sink = rodio::play(
+                        &stream_handle.mixer(),
+                        File::open(&path).ok()?
+                    ).ok()?;
+                    shared_sink.set(Some(sink));
+                    None
+                }();
+        }
+    });
+}
+
+fn init_expansions(ui: &AppWindow, topics_model: ModelRc<TopicListItem>) {
+    // TODO: load expansions from disk
+    let expansions_vec2 = topics_model.iter()
+        .flat_map(|topic| topic.dialog_lines.as_any().downcast_ref::<TopicModel>().unwrap().collect_globals())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .map(|x| {
+            Expansion {
+                name: x.to_shared_string(),
+                substitutions: ModelRc::new(VecModel::from(vec!["1", "2", "3"].iter().map(|x| x.to_shared_string()).collect::<Vec<_>>()))
+            }
+        })
+        .collect::<Vec<_>>();
+    let expansions_model = ModelRc::new(VecModel::from(expansions_vec2));
+    ui.set_expansions(expansions_model.clone());
+    handle_expansion_change(ui.as_weak());
+
     ui.global::<Mappings>().on_expansionNames(|es|
         ModelRc::new(
             VecModel::<SharedString>::from(
@@ -310,6 +342,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             )
         )
     );
+
+    ui.global::<Mappings>().on_expansion_changed({
+        let weak = ui.as_weak();
+        move |index, new_expansions| {
+            if let Some(old_expansion) = expansions_model.row_data(index as usize){
+                expansions_model.set_row_data(index as usize, Expansion {
+                    name: old_expansion.name,
+                    substitutions: new_expansions
+                });
+                expansions_model.iter().for_each(|i| i.substitutions.iter().for_each(|i2| println!("{:?}", i2)));
+                handle_expansion_change(weak.clone());
+            }
+        }
+    });
 
     ui.global::<Mappings>().on_parseSubstitutions(|to_parse| {
         let mut seen = HashSet::<String>::new();
@@ -342,77 +388,45 @@ fn main() -> Result<(), Box<dyn Error>> {
         // ensure newline at the end so user doesn't have to fight the parses
         format!("{}\n", text_block).into()
     });
+}
 
-    ui.global::<GenerationActions>().on_generate_dialogue({
-        let ui_weak = ui.as_weak();
-        let sender = progress_sender.clone();
-        let ct = cancellation_token.clone();
-        move |topic_idx, line_idx| {
-            generate_dialogue_action(
-                ui_weak.clone(),
-                ProgressHandle{ progress_sender: sender.clone(), cancellation: ct.borrow().clone() },
-                topic_idx, line_idx
-            );
-        }
-    });
+fn main() -> Result<(), Box<dyn Error>> {
+    let ui = AppWindow::new()?;
 
-    ui.global::<GenerationActions>().on_mass_generate_dialogue({
-        let ui_weak = ui.as_weak();
-        let sender = progress_sender.clone();
-        let ct = cancellation_token.clone(); 
-        move |regen_stale| {
-            let current_config: Option<ChatterboxGeneratorConfig> = ui_weak
-                .upgrade()
-                .map(|inner| inner.get_genConfig().try_into().ok())
-                .flatten();
-            
-            if let Some(current_config) = current_config {
-                let options = MassGenerationOptions {
-                    current_config_hash: if regen_stale {
-                        Some(current_config.config_hash())
-                    }else{
-                        None
-                    }
-                };
+    let project_dir = ProjectDir::new(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test_assets/VOSpeaker_test_project")
+    )?;
 
-                batch_generate_dialogue_action(
-                    ui_weak.clone(),
-                    ProgressHandle{ 
-                        progress_sender: sender.clone(), 
-                        cancellation: ct.borrow().clone() },
-                    options,
-                );
+    let expand_config = Rc::new(TopicExpansionConfig::default());
+    let substitutions = Rc::new(HashMap::<String, String>::default());
+    let topic_dirs = project_dir.topics
+        .into_iter().map(|topic_dir|
+            TopicListItem{
+                topic_name: topic_dir.name().into(),
+                dialog_lines: ModelRc::new(TopicModel::new(topic_dir, (*substitutions).clone(), (*expand_config).clone())),
             }
-        }
+        ).collect::<Vec<_>>();
+    let topics_model = ModelRc::new(VecModel::from(topic_dirs));
+
+    ui.set_topicListModel(topics_model.clone());
+    ui.global::<FilePicking>().on_pick_wav_file(pick_wav_file);
+    ui.global::<FilePicking>().on_format_path(format_path);
+    ui.set_genConfig(ChatterboxConfig{
+        cfg_weight: 0.5,
+        endpoint: "localhost:9005".into(), // TODO: leave this default when done testing
+        exaggeration: 0.5,
+        temperature: 0.5,
+        voicePath: Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test_assets/female-khajiit.wav")
+            .to_string_lossy().into_owned().into(), // TODO: leave this as default when done testing
     });
 
-    ui.global::<Audio>().on_play_dialog({
-        let ui_weak = ui.as_weak();
-        let stream_handle = rodio::OutputStreamBuilder::open_default_stream()
-            .expect("open default audio stream");
-        let shared_sink  = Cell::<Option<Sink>>::default();
-        move |topic_idx, line_idx| {
-            || -> Option<()> // lets me use ? for early return
-            {
-                let path = ui_weak.upgrade()?
-                    .get_topicListModel()
-                    .row_data(topic_idx as usize)?
-                    .dialog_lines
-                    .as_any().downcast_ref::<TopicModel>()
-                    .expect("Topic model was not custom type")
-                    .audio_path(line_idx as usize)?;
-                println!("Attempting to play audio {topic_idx}:{line_idx} at {}", path.display());
+    init_expansions(&ui, topics_model.clone());
 
-                // Play the sound directly on the device
-                let sink = rodio::play(
-                    &stream_handle.mixer(),
-                    File::open(&path).ok()?
-                ).ok()?;
-                shared_sink.set(Some(sink));
-                None
-            }();
-        }
-    });
+    let (progress_sender, cancellation_token) = init_receivers(&ui);
+    init_generation(&ui, &progress_sender, &cancellation_token);
+    init_dialogue_audio(&ui);
 
     ui.run()?;
 
