@@ -321,7 +321,8 @@ fn init_dialogue_audio(ui: &AppWindow) {
     });
 }
 
-fn init_expansions(ui: &AppWindow, topics_model: ModelRc<TopicListItem>, expand_config_disk: TopicExpansionConfig) {
+fn init_expansions(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, project_dir: &ProjectDir) {
+    let expand_config_disk = project_dir.load_expansion_config().unwrap_or(TopicExpansionConfig::default());
     let generated_expand_mappings = topics_model.iter()
         .flat_map(|topic| topic.dialog_lines.as_any().downcast_ref::<TopicModel>().unwrap().collect_globals())
         .map(|s| (s, vec![]))
@@ -405,6 +406,27 @@ fn init_expansions(ui: &AppWindow, topics_model: ModelRc<TopicListItem>, expand_
     });
 }
 
+fn init_generator(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, project_dir: &ProjectDir) {
+    ui.set_topicListModel(topics_model.clone());
+    ui.global::<FilePicking>().on_pick_wav_file(pick_wav_file);
+    ui.global::<FilePicking>().on_format_path(format_path);
+    let chatterbox_config_disk = project_dir.load_chatterbox_config()
+        .unwrap_or(ChatterboxGeneratorConfig{
+            cfg_weight: 0.5,
+            endpoint: "localhost:9005".into(), // TODO: leave this default when done testing
+            exaggeration: 0.5,
+            temperature: 0.5,
+            voice_path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("test_assets/female-khajiit.wav"), // TODO: leave this as default when done testing
+        });
+
+    if let Some(config) = chatterbox_config_disk.try_into().ok() {
+        ui.set_genConfig(config);
+    }else{
+        println!("Failed to parse chatterbox config from disk. Using defaults instead");
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let ui = AppWindow::new()?;
 
@@ -417,7 +439,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let expand_config = Rc::new(TopicExpansionConfig::default());
     let substitutions = Rc::new(HashMap::<String, String>::default());
 
-    let expand_config_disk = project_dir.load_expansion_config().unwrap_or(TopicExpansionConfig::default());
     let topic_dirs = project_dir.get_topic_dirs().expect("failed to load project topic dirs")
         .into_iter().map(|topic_dir|
             TopicListItem{
@@ -427,42 +448,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         ).collect::<Vec<_>>();
     let topics_model = ModelRc::new(VecModel::from(topic_dirs));
 
-    ui.set_topicListModel(topics_model.clone());
-    ui.global::<FilePicking>().on_pick_wav_file(pick_wav_file);
-    ui.global::<FilePicking>().on_format_path(format_path);
-    let chatterbox_config_disk = project_dir.load_chatterbox_config()
-        .unwrap_or(ChatterboxGeneratorConfig{
-        cfg_weight: 0.5,
-        endpoint: "localhost:9005".into(), // TODO: leave this default when done testing
-        exaggeration: 0.5,
-        temperature: 0.5,
-        voice_path: Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test_assets/female-khajiit.wav"), // TODO: leave this as default when done testing
-    });
-    
-    if let Some(config) = chatterbox_config_disk.try_into().ok() {
-        ui.set_genConfig(config);
-    }else{
-        println!("Failed to parse chatterbox config from disk. Using defaults instead");
-    }
-    
+    init_generator(&ui, &topics_model, &project_dir);
 
-    init_expansions(&ui, topics_model.clone(), expand_config_disk);
+    init_expansions(&ui, &topics_model, &project_dir);
 
     let (progress_sender, cancellation_token) = init_receivers(&ui);
     init_generation(&ui, &progress_sender, &cancellation_token);
     init_dialogue_audio(&ui);
 
     ui.run()?;
-    
+
     // save configs
     project_dir.save_expansion_config(get_expansion_config(&ui))?;
-    
+
     if let Some(chatterbox_config) = ui.get_genConfig().try_into().ok() {
         project_dir.save_chatterbox_config(chatterbox_config)?;
     }else{
         eprintln!("Failed to parse chatterbox config, so cannot save it");
     }
-    
+
     Ok(())
 }
