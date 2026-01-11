@@ -11,6 +11,7 @@ mod chatterbox_generator;
 mod hashes;
 mod models;
 mod progress;
+mod expansions;
 
 use crate::chatterbox_generator::{ChatterboxGenerator, ChatterboxGeneratorConfig};
 use crate::dialog_generator::{ConfigHashable, DialogGenerator};
@@ -21,17 +22,20 @@ use crate::progress::ProgressHandle;
 use crate::project_dir::ProjectDir;
 use async_compat::Compat;
 use rodio::Sink;
-use slint::{spawn_local, CloseRequestResponse, JoinHandle, Model, ModelRc, SharedString, VecModel, Weak};
+use slint::{spawn_local, CloseRequestResponse, JoinHandle, Model, ModelRc, SharedString, ToSharedString, VecModel, Weak};
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use lazy_regex::regex;
 use tokio::sync::watch;
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
+use crate::topic_lines::{SpokenTopicLine, TopicExpansionConfig};
 
 slint::include_modules!();
 
@@ -64,10 +68,10 @@ async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line
     // TODO: is it ok to hold these strong references across async?
     let topic = temp.dialog_lines.as_any().downcast_ref::<TopicModel>()
         .expect("Topic model was not custom type");
-    let line = topic.line(line_idx as usize)?;
-    let clean_line = line.clean();
+    let clean_line = SpokenTopicLine(topic.row_data(topic_idx as usize)?.clean_line.to_string());
     let target_path = topic.audio_path(line_idx as usize)?;
-    
+
+    // slightly naughty construction
     let vo_hash = clean_line.vo_hash();
     let config_hash = config.config_hash();
 
@@ -146,6 +150,62 @@ fn generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, to
     spawn_local(future).unwrap()
 }
 
+fn handle_expansion_change(weak_ui: Weak<AppWindow>) -> TopicExpansionConfig {
+    let ui = weak_ui.upgrade().unwrap();
+    let expansions = ui.get_expansions().iter()
+        .map(|expansion|
+            (
+                expansion.name.to_string(),
+                expansion.substitutions.iter().map(|ss| ss.to_string()).collect::<Vec<_>>(),
+            )
+        )
+        .collect::<HashMap<_, _>>();
+    // create new config
+    let expansions_config = TopicExpansionConfig {
+        expansions,
+        max_expansions: ui.get_allowed_expansions() as usize
+    };
+
+    // assign new config to models.
+    for topic in ui.get_topicListModel().iter() {
+        let custom = topic.dialog_lines.as_any()
+            .downcast_ref::<TopicModel>()
+            .expect("Topic model was not custom type");
+
+        custom.set_expansion_config(expansions_config.clone());
+    }
+
+    expansions_config
+}
+
+fn handle_substitution_change(weak_ui: Weak<AppWindow>) -> HashMap<String, String> {
+    let substitution_regex = regex!(r"^(.+) ?-> ?(.*)$");
+    let ui = weak_ui.upgrade().unwrap();
+    let substitutions = ui.get_substitutions_text().lines()
+        .filter_map(|line| {
+            let captures = substitution_regex.captures(line)?;
+            Some((
+                captures[1].to_string(),
+                captures[2].to_string(),
+            ))
+        }).collect::<HashMap<_, _>>();
+
+    // assign new substitutions to models.
+    for topic in ui.get_topicListModel().iter() {
+        let custom = topic.dialog_lines.as_any()
+            .downcast_ref::<TopicModel>()
+            .expect("Topic model was not custom type");
+
+        custom.set_substitutions(substitutions.clone());
+    }
+
+    substitutions
+}
+
+fn init_generation(ui_weak: Weak<AppWindow>, options: MassGenerationOptions) {
+    
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let ui = AppWindow::new()?;
 
@@ -154,14 +214,45 @@ fn main() -> Result<(), Box<dyn Error>> {
             .join("test_assets/VOSpeaker_test_project")
     )?;
 
+    let expand_config = Rc::new(TopicExpansionConfig::default());
+    let substitutions = Rc::new(HashMap::<String, String>::default());
     let topic_dirs = project_dir.topics
         .into_iter().map(|topic_dir|
             TopicListItem{
                 topic_name: topic_dir.name().into(),
-                dialog_lines: ModelRc::new(TopicModel::new(topic_dir)),
+                dialog_lines: ModelRc::new(TopicModel::new(topic_dir, (*substitutions).clone(), (*expand_config).clone())),
             }
         ).collect::<Vec<_>>();
     let topics_model = VecModel::from(topic_dirs);
+    // TODO: load expansions from disk
+    let expansions_vec2 = topics_model.iter()
+        .flat_map(|topic| topic.dialog_lines.as_any().downcast_ref::<TopicModel>().unwrap().collect_globals())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .map(|x| {
+            Expansion {
+                name: x.to_shared_string(),
+                substitutions: ModelRc::new(VecModel::from(vec!["1", "2", "3"].iter().map(|x| x.to_shared_string()).collect::<Vec<_>>()))
+            }
+        })
+        .collect::<Vec<_>>();
+    let expansions_model = ModelRc::new(VecModel::from(expansions_vec2));
+    ui.set_expansions(expansions_model.clone());
+    handle_expansion_change(ui.as_weak());
+
+    ui.global::<Mappings>().on_expansion_changed({
+        let weak = ui.as_weak();
+        move |index, new_expansions| {
+            if let Some(old_expansion) = expansions_model.row_data(index as usize){
+                expansions_model.set_row_data(index as usize, Expansion {
+                    name: old_expansion.name,
+                    substitutions: new_expansions
+                });
+                expansions_model.iter().for_each(|i| i.substitutions.iter().for_each(|i2| println!("{:?}", i2)));
+                handle_expansion_change(weak.clone());
+            }
+        }
+    });
 
     ui.set_topicListModel(ModelRc::new(topics_model));
     ui.global::<FilePicking>().on_pick_wav_file(pick_wav_file);
@@ -211,6 +302,46 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }).expect("failed to start progress watcher");
+
+    ui.global::<Mappings>().on_expansionNames(|es|
+        ModelRc::new(
+            VecModel::<SharedString>::from(
+                es.iter().map(|e| e.name.into()).collect::<Vec<_>>()
+            )
+        )
+    );
+
+    ui.global::<Mappings>().on_parseSubstitutions(|to_parse| {
+        let mut seen = HashSet::<String>::new();
+        let substitutions = to_parse
+            .lines()
+            // process lines some
+            .filter_map(|line| {if !line.trim().is_empty() {Some(line.trim())} else {None}})
+            // deduplicate in-place
+            .filter(|sub| {
+                let as_string = sub.to_string();
+                return if seen.contains(&as_string) {
+                    false
+                } else {
+                    seen.insert(as_string);
+                    true
+                }
+            })
+            // NOTE: inefficient duplicate allocations
+            .map(|sub| sub.to_string().into())
+            .collect::<Vec<SharedString>>();
+
+        ModelRc::new(VecModel::from(substitutions))
+    });
+
+    ui.global::<Mappings>().on_collapseSubstitutions(|to_collapse| {
+        let text_block = to_collapse.iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>()
+            .join("\n");
+        // ensure newline at the end so user doesn't have to fight the parses
+        format!("{}\n", text_block).into()
+    });
 
     ui.global::<GenerationActions>().on_generate_dialogue({
         let ui_weak = ui.as_weak();

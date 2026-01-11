@@ -1,0 +1,57 @@
+
+import { ComboBox, TextEdit, SpinBox } from "std-widgets.slint";
+export struct Expansion {
+    name: string,
+    substitutions: [string]
+}
+
+export global Mappings {
+    pure callback expansionNames([Expansion]) -> [string];
+    pure callback parseSubstitutions(string) -> [string];
+    pure callback collapseSubstitutions([string]) -> string;
+    callback expansion_changed(int, [string]);
+}
+
+export component ExpansionEditor inherits VerticalLayout {
+    in-out property <Expansion> expansion;
+    callback expansion_changed([string]);
+
+    TextEdit {
+        text: Mappings.collapseSubstitutions(expansion.substitutions);
+        placeholder-text: "Jack\nJohn\nJill";
+        edited(text) => {
+            expansion_changed(Mappings.parseSubstitutions(text));
+        }
+    }
+}
+
+export component ExpansionsEditor inherits VerticalLayout {
+    in-out property <[Expansion]> expansions;
+    in-out property <int> allowed_expansions;
+
+    HorizontalLayout {
+        Text {
+            text: "Expansions per line:";
+            vertical-alignment: center;
+        }
+        sb := SpinBox {
+            minimum: 1;
+            maximum: 1024;
+            value <=> allowed_expansions;
+        }
+        padding-bottom: 15px;
+    }
+
+    cb := ComboBox {
+        model: Mappings.expansionNames(expansions);
+    }
+
+    Rectangle {
+        for expansion[i] in expansions: Rectangle {
+            if i == cb.current-index || (i == 0 && cb.current-index == -1): ExpansionEditor {
+                expansion: expansion;
+                expansion_changed(new_expansions) => {Mappings.expansion_changed(i, new_expansions)}
+            }
+        }
+    }
+}

@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::hashes::ConfigHash;
 use thiserror::Error;
 use serde::de::DeserializeOwned;
-use crate::topic_lines::CleanTopicLine;
+use crate::topic_lines::SpokenTopicLine;
 
 /// ConfigHashable is unique to a normal hash in that
 /// it does not need to satisfy a == b -> config_hash(a) == config_hash(b).
@@ -38,5 +38,5 @@ pub enum DialogGenerationError {
 pub trait DialogGenerator {
     type Config: ConfigHashable;
 
-    async fn generate_dialog(config: Self::Config, dialog: CleanTopicLine) -> Result<Vec<u8>, DialogGenerationError>;
+    async fn generate_dialog(config: Self::Config, dialog: SpokenTopicLine) -> Result<Vec<u8>, DialogGenerationError>;
 }

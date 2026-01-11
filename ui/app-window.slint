@@ -1,13 +1,19 @@
-import { Button, HorizontalBox, ListView, ScrollView, Slider, SpinBox, Palette, VerticalBox, CheckBox } from "std-widgets.slint";
+import { Button, HorizontalBox, ListView, ScrollView, Slider, SpinBox, Palette, VerticalBox, CheckBox, TabWidget } from "std-widgets.slint";
 import { ChatterboxConfigView, ChatterboxConfig, GenerationActions, FilePicking } from "generator.slint";
 import { TopicList, TopicListItem, Audio } from "topics.slint";
 import { Progress, ProgressDisplay, ProgressActions } from "progress.slint";
-export  { Audio, GenerationActions, FilePicking, ProgressActions }
+import { ExpansionsEditor } from "expansions.slint";
+import { Mappings, Expansion } from "expansions.slint";
+import { SubstitutionsEditor } from "substitutions.slint";
+export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings }
 
 export component AppWindow inherits Window {
     in-out property <[TopicListItem]> topicListModel;
     in-out property <ChatterboxConfig> genConfig;
     in-out property <Progress> progress;
+    in-out property <[Expansion]> expansions;
+    in-out property <int> allowed_expansions: 8;
+    in-out property <string> substitutions_text;
     title: "VOSpeaker";
     preferred-width: 800px;
     preferred-height: 600px;
@@ -17,9 +23,28 @@ export component AppWindow inherits Window {
             HorizontalBox {
                 vertical-stretch: 1;
 
-                ChatterboxConfigView {
-                    config <=> genConfig;
+                VerticalLayout {
                     width: 30%;
+                    ChatterboxConfigView {
+                        config <=> genConfig;
+                        height:40%;
+                    }
+                    TabWidget {
+                        height: 60%;
+                        Tab {
+                            title: "Expansions";
+                            ExpansionsEditor {
+                                expansions <=> expansions;
+                                allowed_expansions <=> allowed_expansions;
+                            }
+                        }
+                        Tab {
+                            title: "Substitutions";
+                            SubstitutionsEditor {
+                                substitutionsText <=> substitutions_text;
+                            }
+                        }
+                    }
                 }
                 TopicList {
                     model <=> topicListModel;
@@ -39,6 +64,7 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 0;
                 }
                 CheckBox {
+                    text: "Regenerate stale lines";
                     checked <=> regen_stale;
                 }
                 Button {

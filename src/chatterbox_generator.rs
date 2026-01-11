@@ -7,7 +7,7 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::io::BufStream;
 use crate::ChatterboxConfig;
-use crate::topic_lines::CleanTopicLine;
+use crate::topic_lines::SpokenTopicLine;
 
 pub struct ChatterboxGenerator;
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -49,7 +49,7 @@ impl TryFrom<ChatterboxConfig> for ChatterboxGeneratorConfig{
 impl DialogGenerator for ChatterboxGenerator {
     type Config = ChatterboxGeneratorConfig;
 
-    async fn generate_dialog(config: Self::Config, dialog: CleanTopicLine) -> Result<Vec<u8>, DialogGenerationError> {
+    async fn generate_dialog(config: Self::Config, dialog: SpokenTopicLine) -> Result<Vec<u8>, DialogGenerationError> {
         let mut stream = BufStream::new(TcpStream::connect(&config.endpoint).await?);
         // send config and voiceline path for cache
         let request_line = format!("{}|{}|{}|{}\n",
@@ -105,7 +105,7 @@ mod test{
             voice_path: Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("test_assets/female-khajiit.wav"),
         };
-        let dialog = CleanTopicLine("This is a test message".to_string());
+        let dialog = SpokenTopicLine("This is a test message".to_string());
         let result = ChatterboxGenerator::generate_dialog(config, dialog).await.unwrap();
         assert_ne!(result.len(), 0);
         println!("Dialog generation result len: {:?}", result.len());

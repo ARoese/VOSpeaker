@@ -1,22 +1,24 @@
+use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use lazy_regex::regex;
+use lazy_regex::{regex, Regex};
 use crate::hashes::VOHash;
 use crate::topic_lines::ExplodedMember::{RawText, Substitute};
 
-#[derive(Debug, Default)]
-pub struct TopicSubstituteConfig{
-    pub substitutions: HashMap<String, Vec<String>>,
+#[derive(Debug, Default, Clone)]
+pub struct TopicExpansionConfig {
+    pub expansions: HashMap<String, Vec<String>>,
     pub max_expansions: usize
 }
 
 #[derive(Debug, Clone)]
-enum ExplodedMember{
+pub enum ExplodedMember{
     RawText(String),
     Substitute(String)
 }
+
 #[derive(Debug, Clone)]
-struct ExplodedRawLine(Vec<ExplodedMember>);
+pub struct ExplodedRawLine(pub Vec<ExplodedMember>);
 impl ExplodedRawLine {
 
     pub fn from(line: &RawTopicLine) -> ExplodedRawLine {
@@ -97,14 +99,16 @@ impl ExplodedRawLine {
 #[derive(Debug, Clone)]
 pub struct RawTopicLine(pub String);
 impl RawTopicLine {
-    pub fn substitute(&self, config: &TopicSubstituteConfig) -> Vec<SubstitutedTopicLine> {
-        ExplodedRawLine::from(self)
-            .permute(&config.substitutions)
+    pub fn substitute(&self, config: &TopicExpansionConfig) -> Vec<SubstitutedTopicLine> {
+        let exploded = ExplodedRawLine::from(self);
+        exploded
+            .permute(&config.expansions)
             .into_iter()
             .collect::<HashSet<_>>()
             .into_iter()
-            .take(config.max_expansions) // limit expansions
-            .map(|s| SubstitutedTopicLine(s))
+            // limit expansions, but always take at least 1
+            .take(max(1, config.max_expansions))
+            .map(|s| SubstitutedTopicLine(s, exploded.clone()))
             .collect()
     }
 }
@@ -123,9 +127,24 @@ fn without_leading_trailing_parens(line: &str) -> &str {
 }
 
 #[derive(Debug, Clone)]
-pub struct SubstitutedTopicLine(pub String);
+pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
 impl SubstitutedTopicLine {
-    pub fn clean(&self) -> CleanTopicLine {
+    fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
+        let mut working = original.clone();
+        for (original, replacement) in substitutions {
+            let escaped = regex::escape(&original);
+            // match group 2 (unnamed) is the group to be replaced
+            // this unwrap will always succeed because we substitute an escaped literal
+            // this is a little slow due to compilation, but
+            // it's ok because we need the expressiveness
+            // NOTE: this could probably be improved using a generic expression and a sliding window
+            let re = Regex::new(&format!(r"(?i)(?<prefix>^|[\s[:punct:]])({})(?<suffix>[\s[:punct:]]|$)", escaped)).unwrap();
+            working = re.replace_all(original.as_str(), &format!("${{prefix}}{}${{suffix}}", replacement)).to_string();
+        }
+        
+        working
+    }
+    pub fn spoken(&self, substitutions: &HashMap<String, String>) -> SpokenTopicLine {
         let trimmed = self.0.trim()
             .split_whitespace()
             .collect::<Vec<&str>>()
@@ -134,20 +153,22 @@ impl SubstitutedTopicLine {
         // TODO: fix this. It doesn't actually remove the start of line
         // TODO: and end of line parenthesized regions
         let without_parens = without_leading_trailing_parens(&trimmed).to_string();
-        CleanTopicLine(
-            without_parens
+        
+        let substituted = Self::perform_substitutions(&without_parens, substitutions.clone());
+        SpokenTopicLine(
+            substituted
         )
     }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct CleanTopicLine(pub String);
-impl Display for CleanTopicLine {
+pub struct SpokenTopicLine(pub String);
+impl Display for SpokenTopicLine {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
-impl CleanTopicLine {
+impl SpokenTopicLine {
     pub fn vo_hash(&self) -> VOHash {
         VOHash(*md5::compute(&self.0))
     }
@@ -166,8 +187,8 @@ mod tests {
             "This is a <global=item> with many <global=object>"
         ].into_iter().map(|s| RawTopicLine(s.to_string())).collect();
 
-        let config = TopicSubstituteConfig {
-            substitutions: hashmap!{
+        let config = TopicExpansionConfig {
+            expansions: hashmap!{
                 "item" => vec!["line", "voiceline", "<global=invalidSub>"],
                 "object" => vec!["orange", "apple"]
             }.into_iter()

@@ -1,15 +1,20 @@
 use crate::hashes::ConfigHash;
 use crate::topic_dir::TopicDir;
-use crate::topic_lines::{SubstitutedTopicLine, TopicSubstituteConfig};
+use crate::topic_lines::{ExplodedMember, ExplodedRawLine, SubstitutedTopicLine, TopicExpansionConfig};
 use crate::TopicDialogLine;
 use slint::{Model, ModelNotify, ModelTracker};
 use std::any::Any;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+type SubstitutionsMap = HashMap<String, String>;
 
 pub struct TopicModel {
     // this is still required since we need to add mutation functions later
     pub topic_dir: RefCell<TopicDir>,
+    substitutions: RefCell<SubstitutionsMap>,
+    expansion_config: RefCell<TopicExpansionConfig>,
     lines: RefCell<Vec<SubstitutedTopicLine>>,
     // the ModelNotify will allow to notify the UI that the model changes
     notify: ModelNotify
@@ -20,12 +25,31 @@ pub struct MassGenerationOptions {
 }
 
 impl TopicModel {
-    pub fn new(topic_dir: TopicDir) -> TopicModel {
+    pub fn new(topic_dir: TopicDir, substitutions: SubstitutionsMap, expansions: TopicExpansionConfig) -> TopicModel {
         TopicModel {
-            lines: Self::compute_expanded_lines(&topic_dir).into(),
+            lines: Self::compute_expanded_lines(&topic_dir, &expansions, &substitutions).into(),
             topic_dir: topic_dir.into(),
             notify: Default::default(),
+            substitutions: substitutions.into(),
+            expansion_config: expansions.into()
         }
+    }
+
+    pub fn set_substitutions(&self, new_substitutions: SubstitutionsMap){
+        self.substitutions.replace(new_substitutions);
+        // this will greatly change the model, but
+        // changes will be available on re-request of model values
+        self.notify.reset();
+    }
+
+    pub fn set_expansion_config(&self, new_expansions: TopicExpansionConfig){
+        self.expansion_config.replace(new_expansions);
+        self.lines.replace(Self::compute_expanded_lines(
+            &self.topic_dir.borrow(),
+            &self.expansion_config.borrow(),
+            &self.substitutions.borrow()
+        ));
+        self.notify.reset(); // this will also greatly change the model
     }
 
     fn make_model_type(&self, line_idx: usize) -> Option<TopicDialogLine> {
@@ -33,15 +57,15 @@ impl TopicModel {
         let line = lines_ref.get(line_idx)?;
         Some(TopicDialogLine {
             substituted_line: line.0.clone().into(),
-            clean_line: line.clean().0.into(),
-            can_play: self.topic_dir.borrow().wav_path(&line.clean().vo_hash()).exists()
+            clean_line: line.spoken(&self.substitutions.borrow()).0.into(),
+            can_play: self.topic_dir.borrow().wav_path(&line.spoken(&self.substitutions.borrow()).vo_hash()).exists()
         })
     }
 
     pub fn should_generate(&self, line_idx: usize, options: &MassGenerationOptions) -> bool {
         // don't generate if the line doesn't exist
         self.lines.borrow().get(line_idx).map_or(false, |line| {
-            let clean_line = line.clean();
+            let clean_line = line.spoken(&self.substitutions.borrow());
             let vo_hash = clean_line.vo_hash();
             let config_hash = self.topic_dir.borrow().get_config_hash(&vo_hash).cloned();
 
@@ -58,17 +82,11 @@ impl TopicModel {
         })
     }
 
-    fn compute_expanded_lines(topic_dir: &TopicDir) -> Vec<SubstitutedTopicLine> {
-        // TODO: make this configurable
-        let config = TopicSubstituteConfig{
-            substitutions: Default::default(),
-            max_expansions: 16,
-        };
-
+    fn compute_expanded_lines(topic_dir: &TopicDir, config: &TopicExpansionConfig, substitutions: &SubstitutionsMap) -> Vec<SubstitutedTopicLine> {
         topic_dir.topic_file_ref().lines()
             .iter().flat_map(|line| {line.substitute(&config)})
             // do not show empty lines
-            .filter(|line| !line.clean().0.is_empty())
+            .filter(|line| !line.spoken(&substitutions).0.is_empty())
             /*.map(|line| {
                 TopicDialogLine {
                     substituted_line: line.0.clone().into(),
@@ -81,7 +99,7 @@ impl TopicModel {
 
     pub fn audio_path(&self, line: usize) -> Option<PathBuf> {
         let vo_line = self.lines.borrow().get(line)?.clone();
-        Some(self.topic_dir.borrow().wav_path(&vo_line.clean().vo_hash()))
+        Some(self.topic_dir.borrow().wav_path(&vo_line.spoken(&self.substitutions.borrow()).vo_hash()))
     }
     
     pub fn line(&self, line_idx: usize) -> Option<SubstitutedTopicLine> {
@@ -90,6 +108,24 @@ impl TopicModel {
     
     pub fn wav_written_for(&self, line_idx: usize) {
         self.notify.row_changed(line_idx);
+    }
+
+    pub fn collect_globals(&self) -> HashSet<String> {
+        self.topic_dir.borrow()
+            .topic_file_ref().lines()
+            .iter()
+            .map(ExplodedRawLine::from)
+            .flat_map(|line| 
+                line.0.iter().filter_map(|x| match x {
+                    ExplodedMember::RawText(_) => None,
+                    ExplodedMember::Substitute(name) => Some(name.to_string()),
+                }).collect::<HashSet<_>>()
+            ).collect::<HashSet<_>>()
+        /*
+        self.lines.borrow().iter()
+            .flat_map(|line| {line.globals()})
+            .collect()
+         */
     }
 }
 
