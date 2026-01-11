@@ -66,12 +66,12 @@ component TopicListItemView inherits VerticalLayout {
                 Text{
                     color: Palette.foreground;
                     overflow: elide;
-                    text: dLine.substituted_line;
+                    text: dLine.clean_line;
                 }
                 Text{
                     color: Palette.foreground.transparentize(0.6);
                     overflow: elide;
-                    text: dLine.clean_line;
+                    text: dLine.substituted-line;
                 }
             }
 

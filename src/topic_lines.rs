@@ -20,7 +20,7 @@ impl TopicExpansionConfig {
                 .and_modify(|existing_value| existing_value.extend(value.clone()))
                 .or_insert(value);
         }
-        
+
         TopicExpansionConfig {
             max_expansions: max(self.max_expansions, other.max_expansions),
             expansions: new_expansions
@@ -131,8 +131,8 @@ impl RawTopicLine {
 }
 
 fn without_leading_trailing_parens(line: &str) -> &str {
-    let start_parens_regex = regex!(r"^(\(.*)\).*");
-    let end_parens_regex = regex!(r".*(\(.*)\)$");
+    let start_parens_regex = regex!(r"^(\(.*?\)).*");
+    let end_parens_regex = regex!(r".*(\(.*?\))$");
     let mut without_parens = line;
     if let Some(capture) = start_parens_regex.captures(line) {
         without_parens = without_parens.trim_start_matches(&capture[1]);
@@ -155,8 +155,13 @@ impl SubstitutedTopicLine {
             // this is a little slow due to compilation, but
             // it's ok because we need the expressiveness
             // NOTE: this could probably be improved using a generic expression and a sliding window
-            let re = Regex::new(&format!(r"(?i)(?<prefix>^|[\s[:punct:]])({})(?<suffix>[\s[:punct:]]|$)", escaped)).unwrap();
-            working = re.replace_all(original.as_str(), &format!("${{prefix}}{}${{suffix}}", replacement)).to_string();
+            let re = Regex::new(&format!(r"(?i)(?<prefix>[\s[:punct:]]*){}(?<suffix>[\s[:punct:]]*)", escaped)).unwrap();
+            let replacement_rep = format!("${{prefix}}{}${{suffix}}", replacement);
+            if let Some(prefix) = re.captures(&working) {
+                let pref = &prefix["prefix"];
+                println!("{}", pref);
+            }
+            working = re.replace_all(working.as_str(), &replacement_rep).to_string();
         }
         
         working
@@ -167,9 +172,7 @@ impl SubstitutedTopicLine {
             .collect::<Vec<&str>>()
             .join(" ");
 
-        // TODO: fix this. It doesn't actually remove the start of line
-        // TODO: and end of line parenthesized regions
-        let without_parens = without_leading_trailing_parens(&trimmed).to_string();
+        let without_parens = without_leading_trailing_parens(&trimmed).to_string().trim().to_string();
         
         let substituted = Self::perform_substitutions(&without_parens, substitutions.clone());
         SpokenTopicLine(
@@ -197,7 +200,7 @@ mod tests {
     use maplit::hashmap;
 
     #[test]
-    fn test_substitutions() {
+    fn test_expansions() {
         let raw_lines: Vec<_> = vec![
             "This is a dialogue line with no substitutions.",
             "This is a <alias=item> with a single substitution.",
@@ -222,6 +225,38 @@ mod tests {
 
         for line in subs {
             println!("{:?}", line);
+        }
+    }
+
+    #[test]
+    fn test_substitutions() {
+        let raw_lines: Vec<_> = vec![
+            "(pre-text parens) This is a dialogue line with no substitutions. (post-text parens)",
+        ].into_iter().map(|s| RawTopicLine(s.to_string())).collect();
+
+        let config = TopicExpansionConfig {
+            expansions: hashmap!{
+                "item" => vec!["line", "voiceline", "<global=invalidSub>"],
+                "object" => vec!["orange", "apple"]
+            }.into_iter()
+                .map(
+                    |(k,v)|
+                        (String::from(k), v.into_iter().map(String::from).collect())
+                ).collect(),
+            max_expansions: 16
+        };
+
+        let subs: Vec<_> = raw_lines
+            .iter().flat_map(|raw_line|{raw_line.substitute(&config)})
+            .collect();
+
+        let substitutions = hashmap!{
+            "dialogue".to_string() => "chat".to_string()
+        };
+
+        for line in subs.iter() {
+            let spoken = line.spoken(&substitutions);
+            println!("{:?}", spoken);
         }
     }
 }
