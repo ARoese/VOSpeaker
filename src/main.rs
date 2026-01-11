@@ -81,7 +81,7 @@ async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line
     if let Ok(result) = result {
         // TODO: naughty blocking call. The add_vo function should not be responsible for
         // TODO: writing the wav file
-        topic.topic_dir.borrow_mut().add_vo(&vo_hash, &config_hash, result).ok()?;
+        topic.topic_dir.add_vo(&vo_hash, &config_hash, result).ok()?;
         topic.wav_written_for(line_idx as usize);
     }
 
@@ -151,8 +151,7 @@ fn generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, to
     spawn_local(future).unwrap()
 }
 
-fn handle_expansion_change(weak_ui: Weak<AppWindow>) -> TopicExpansionConfig {
-    let ui = weak_ui.upgrade().unwrap();
+fn get_expansion_config(ui: &AppWindow) -> TopicExpansionConfig {
     let expansions = ui.get_expansions().iter()
         .map(|expansion|
             (
@@ -162,11 +161,15 @@ fn handle_expansion_change(weak_ui: Weak<AppWindow>) -> TopicExpansionConfig {
         )
         .collect::<HashMap<_, _>>();
     // create new config
-    let expansions_config = TopicExpansionConfig {
+    TopicExpansionConfig {
         expansions,
         max_expansions: ui.get_allowed_expansions() as usize
-    };
+    }
+}
 
+fn handle_expansion_change(weak_ui: Weak<AppWindow>) -> TopicExpansionConfig {
+    let ui = weak_ui.upgrade().unwrap();
+    let expansions_config = get_expansion_config(&ui);
     // assign new config to models.
     for topic in ui.get_topicListModel().iter() {
         let custom = topic.dialog_lines.as_any()
@@ -318,21 +321,26 @@ fn init_dialogue_audio(ui: &AppWindow) {
     });
 }
 
-fn init_expansions(ui: &AppWindow, topics_model: ModelRc<TopicListItem>) {
-    // TODO: load expansions from disk
-    let expansions_vec2 = topics_model.iter()
+fn init_expansions(ui: &AppWindow, topics_model: ModelRc<TopicListItem>, expand_config_disk: TopicExpansionConfig) {
+    let generated_expand_mappings = topics_model.iter()
         .flat_map(|topic| topic.dialog_lines.as_any().downcast_ref::<TopicModel>().unwrap().collect_globals())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .map(|x| {
-            Expansion {
-                name: x.to_shared_string(),
-                substitutions: ModelRc::new(VecModel::from(vec!["1", "2", "3"].iter().map(|x| x.to_shared_string()).collect::<Vec<_>>()))
-            }
-        })
-        .collect::<Vec<_>>();
-    let expansions_model = ModelRc::new(VecModel::from(expansions_vec2));
+        .map(|s| (s, vec![]))
+        .collect::<HashMap<_, Vec<String>>>();
+
+    let generated_config = TopicExpansionConfig {
+        expansions: generated_expand_mappings,
+        max_expansions: 1,
+    };
+
+    let expand_config = generated_config.merge_with(&expand_config_disk);
+    let expansions: Vec<Expansion> = expand_config.expansions.iter().map(|(name, expansions)| Expansion{
+        name: name.to_shared_string(),
+        substitutions: ModelRc::new(VecModel::from(expansions.iter().map(|x| x.to_shared_string()).collect::<Vec<_>>())),
+    }).collect();
+
+    let expansions_model = ModelRc::new(VecModel::from(expansions));
     ui.set_expansions(expansions_model.clone());
+    ui.set_allowed_expansions(expand_config.max_expansions as i32);
     handle_expansion_change(ui.as_weak());
 
     ui.global::<Mappings>().on_expansionNames(|es|
@@ -351,9 +359,16 @@ fn init_expansions(ui: &AppWindow, topics_model: ModelRc<TopicListItem>) {
                     name: old_expansion.name,
                     substitutions: new_expansions
                 });
-                expansions_model.iter().for_each(|i| i.substitutions.iter().for_each(|i2| println!("{:?}", i2)));
+                //expansions_model.iter().for_each(|i| i.substitutions.iter().for_each(|i2| println!("EXPANSION_ENTRY_DEBUG: {:?}", i2)));
                 handle_expansion_change(weak.clone());
             }
+        }
+    });
+
+    ui.global::<Mappings>().on_max_expansions_changed({
+        let weak = ui.as_weak();
+        move || {
+            handle_expansion_change(weak.clone());
         }
     });
 
@@ -398,9 +413,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             .join("test_assets/VOSpeaker_test_project")
     )?;
 
+
     let expand_config = Rc::new(TopicExpansionConfig::default());
     let substitutions = Rc::new(HashMap::<String, String>::default());
-    let topic_dirs = project_dir.topics
+
+    let expand_config_disk = project_dir.load_expansion_config().unwrap_or(TopicExpansionConfig::default());
+    let topic_dirs = project_dir.get_topic_dirs().expect("failed to load project topic dirs")
         .into_iter().map(|topic_dir|
             TopicListItem{
                 topic_name: topic_dir.name().into(),
@@ -422,13 +440,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             .to_string_lossy().into_owned().into(), // TODO: leave this as default when done testing
     });
 
-    init_expansions(&ui, topics_model.clone());
+    init_expansions(&ui, topics_model.clone(), expand_config_disk);
 
     let (progress_sender, cancellation_token) = init_receivers(&ui);
     init_generation(&ui, &progress_sender, &cancellation_token);
     init_dialogue_audio(&ui);
 
     ui.run()?;
-
+    project_dir.save_expansion_config(get_expansion_config(&ui))?;
     Ok(())
 }

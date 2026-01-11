@@ -1,11 +1,12 @@
 use std::fs;
 use std::io::{Error, ErrorKind};
+use std::error::Error as ErrorTrait;
 use std::path::{Path, PathBuf};
 use crate::topic_dir::TopicDir;
+use crate::topic_lines::TopicExpansionConfig;
 
 pub struct ProjectDir {
-    pub path: PathBuf,
-    pub topics: Vec<TopicDir>
+    pub path: PathBuf
 }
 
 fn topics_path(path: &Path) -> PathBuf {
@@ -18,7 +19,15 @@ impl ProjectDir {
             return Err(Error::new(ErrorKind::InvalidInput, "path is not a directory"));
         }
 
-        let topics_path = topics_path(path);
+        Ok(ProjectDir {
+            path: path.to_path_buf()
+        })
+    }
+
+    /// this is very likely to fail if previously requested topic dirs weren't closed yet.
+    /// make sure to drop the topic dirs provided before calling this function again
+    pub fn get_topic_dirs(&self) -> Result<Vec<TopicDir>, Error> {
+        let topics_path = topics_path(&self.path);
         fs::create_dir_all(&topics_path)?;
 
         // TODO: logging
@@ -29,25 +38,20 @@ impl ProjectDir {
         let topics = dirs.iter()
             .filter_map(|d| TopicDir::new(&d.path()).ok())
             .collect::<Vec<_>>();
-
-        Ok(ProjectDir {
-            path: path.to_path_buf(),
-            topics
-        })
+        Ok(topics)
     }
 
-    pub fn add_topic(&mut self, topic_file: &Path) -> Result<(), Error> {
-        let new_dir = TopicDir::create_new(&topics_path(&self.path), &topic_file)?;
-        self.topics.push(new_dir);
-        Ok(())
+    const EXPANSIONS_CONF_NAME: &str = "expansions.toml";
+    pub fn load_expansion_config(&self) -> Result<TopicExpansionConfig, Box<dyn ErrorTrait>> {
+        let expansions_path = self.path.join(Self::EXPANSIONS_CONF_NAME);
+        let expansions_text = fs::read_to_string(&expansions_path)?;
+        Ok(toml::from_str::<TopicExpansionConfig>(&expansions_text)?)
     }
-    
-    pub fn remove_topic(&mut self, index: usize) -> Result<(), Error> {
-        if index >= self.topics.len() {
-            return Err(Error::new(ErrorKind::InvalidInput, "index out of range"));
-        }
-        let deleted = self.topics.remove(index);
-        deleted.delete()
+
+    pub fn save_expansion_config(&self, config: TopicExpansionConfig) -> Result<(), Box<dyn ErrorTrait>> {
+        let expansions_string = toml::to_string(&config)?;
+        let expansions_path = self.path.join(Self::EXPANSIONS_CONF_NAME);
+        Ok(fs::write(&expansions_path, expansions_string)?)
     }
 }
 
@@ -60,7 +64,8 @@ mod tests {
         let test_folder_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test_assets/VOSpeaker_test_project");
         let project = ProjectDir::new(&test_folder_path).unwrap();
-        for topic in project.topics {
+        let topics = project.get_topic_dirs().unwrap();
+        for topic in topics {
             println!("{}", topic.name());
         }
     }

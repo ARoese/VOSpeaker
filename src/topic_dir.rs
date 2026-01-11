@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -7,7 +8,7 @@ use crate::topic_file::TopicFile;
 
 pub struct TopicDir {
     path: PathBuf,
-    config_map: ConfigMapFile,
+    config_map: RefCell<ConfigMapFile>,
     topic_file: TopicFile
 }
 
@@ -26,7 +27,7 @@ impl TopicDir {
         let config_map_path = path.join("configMap.bin");
         Ok(TopicDir {
             path: path.to_path_buf(),
-            config_map: ConfigMapFile::new(&config_map_path)?,
+            config_map: ConfigMapFile::new(&config_map_path)?.into(),
             topic_file: TopicFile::new(&topic_file_path)?,
         })
     }
@@ -61,13 +62,13 @@ impl TopicDir {
     }
 
     /// get the config hash associated with the given VOHash, if one exists.
-    pub fn get_config_hash(&self, hash: &VOHash) -> Option<&ConfigHash> {
-        self.config_map.get_hash(hash)
+    pub fn get_config_hash(&self, hash: &VOHash) -> Option<ConfigHash> {
+        self.config_map.borrow().get_hash(hash).map(|hash| hash.clone())
     }
 
     /// add a vo wav file to the topic dir
-    pub fn add_vo(&mut self, vo_hash: &VOHash, config_hash: &ConfigHash, file: Vec<u8>) -> Result<(), Error> {
-        self.config_map.set_hash(vo_hash, config_hash)?;
+    pub fn add_vo(&self, vo_hash: &VOHash, config_hash: &ConfigHash, file: Vec<u8>) -> Result<(), Error> {
+        self.config_map.borrow_mut().set_hash(vo_hash, config_hash)?;
         fs::write(self.wav_path(&vo_hash), file)?;
         Ok(())
     }

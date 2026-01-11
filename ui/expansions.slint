@@ -10,6 +10,7 @@ export global Mappings {
     pure callback parseSubstitutions(string) -> [string];
     pure callback collapseSubstitutions([string]) -> string;
     callback expansion_changed(int, [string]);
+    callback max_expansions_changed();
 }
 
 export component ExpansionEditor inherits VerticalLayout {
@@ -38,6 +39,7 @@ export component ExpansionsEditor inherits VerticalLayout {
             minimum: 1;
             maximum: 1024;
             value <=> allowed_expansions;
+            changed value => Mappings.max_expansions_changed();
         }
         padding-bottom: 15px;
     }

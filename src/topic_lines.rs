@@ -2,13 +2,30 @@ use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use lazy_regex::{regex, Regex};
+use serde::{Deserialize, Serialize};
 use crate::hashes::VOHash;
 use crate::topic_lines::ExplodedMember::{RawText, Substitute};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TopicExpansionConfig {
     pub expansions: HashMap<String, Vec<String>>,
     pub max_expansions: usize
+}
+
+impl TopicExpansionConfig {
+    pub fn merge_with(&self, other: &TopicExpansionConfig) -> Self {
+        let mut new_expansions = self.expansions.clone();
+        for (key, value) in other.expansions.clone() {
+            new_expansions.entry(key)
+                .and_modify(|existing_value| existing_value.extend(value.clone()))
+                .or_insert(value);
+        }
+        
+        TopicExpansionConfig {
+            max_expansions: max(self.max_expansions, other.max_expansions),
+            expansions: new_expansions
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
