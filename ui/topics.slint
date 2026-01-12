@@ -25,16 +25,31 @@ component TopicListItemView inherits VerticalLayout {
     Rectangle {
         height: 30px;
         background: Palette.alternate-background;
-        HorizontalLayout {
-            Button {
-                text: expanded ? "collapse" : "expand";
-                clicked => {expand_clicked()}
-            }
-            Text {
-                horizontal-stretch: 1;
-                vertical-alignment: center;
-                text: item.topic-name;
-                color: Palette.alternate-foreground;
+        TouchArea {
+            clicked => {expand_clicked()}
+
+            HorizontalLayout {
+                // TODO: figure out how to make this an icon
+                Text {
+                    text: " ";
+                }
+
+                Text {
+                    text: ">";
+                    transform-rotation: expanded ? 90deg : 0deg;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: " ";
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    text: item.topic-name;
+                    color: Palette.alternate-foreground;
+                }
             }
         }
     }
