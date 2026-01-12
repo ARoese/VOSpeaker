@@ -7,6 +7,7 @@ export struct Expansion {
 
 export global Mappings {
     pure callback expansionNames([Expansion]) -> [string];
+    // TODO: remove this
     pure callback parseSubstitutions(string) -> [string];
     pure callback collapseSubstitutions([string]) -> string;
     callback expansion_changed(int, [string]);

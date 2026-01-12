@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::error::Error as ErrorTrait;
@@ -66,6 +67,19 @@ impl ProjectDir {
         let chatterbox_text = toml::to_string(&config)?;
         let chatterbox_path = self.path.join(Self::CHATTERBOX_CONFIG_NAME);
         Ok(fs::write(&chatterbox_path, chatterbox_text)?)
+    }
+    
+    const SUBSTITUTIONS_CONFIG_NAME: &str = "substitutions.toml";
+    pub fn load_substitutions(&self) -> Result<HashMap<String, String>, Box<dyn ErrorTrait>> {
+        let substitutions_path = self.path.join(Self::SUBSTITUTIONS_CONFIG_NAME);
+        let substitutions_text = fs::read_to_string(&substitutions_path)?;
+        Ok(toml::from_str::<HashMap<String, String>>(&substitutions_text)?)
+    }
+    
+    pub fn save_substitutions(&self, substitutions: HashMap<String, String>) -> Result<(), Box<dyn ErrorTrait>> {
+        let substitutions_path = self.path.join(Self::SUBSTITUTIONS_CONFIG_NAME);
+        let substitutions_text = toml::to_string(&substitutions)?;
+        Ok(fs::write(&substitutions_path, substitutions_text)?)
     }
 }
 

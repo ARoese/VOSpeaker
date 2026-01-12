@@ -1,9 +1,15 @@
 import { TextEdit } from "std-widgets.slint";
+
+export global SubstitutionsActions {
+    callback substitutions_changed();
+}
+
 export component SubstitutionsEditor inherits VerticalLayout {
     in-out property <string> substitutionsText;
 
     TextEdit {
         text <=> substitutionsText;
         placeholder-text: "Jarl -> Yarl\nXi -> She";
+        changed text => {SubstitutionsActions.substitutions_changed()}
     }
 }

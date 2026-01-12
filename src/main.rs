@@ -11,7 +11,6 @@ mod chatterbox_generator;
 mod hashes;
 mod models;
 mod progress;
-mod expansions;
 
 use crate::chatterbox_generator::{ChatterboxGenerator, ChatterboxGeneratorConfig};
 use crate::dialog_generator::{ConfigHashable, DialogGenerator};
@@ -167,6 +166,19 @@ fn get_expansion_config(ui: &AppWindow) -> TopicExpansionConfig {
     }
 }
 
+fn get_substitutions(ui: &AppWindow) -> HashMap<String, String> {
+    let substitutions_string = ui.get_substitutions_text().to_string();
+    substitutions_string.lines()
+        .filter_map(|l| {
+            let parts = l.split("->").collect::<Vec<_>>();
+            return if parts.len() != 2 {
+                None
+            } else {
+                Some((parts[0].trim().to_string(), parts[1].trim().to_string()))
+            }
+        }).collect::<HashMap<String, String>>()
+}
+
 fn handle_expansion_change(weak_ui: Weak<AppWindow>) -> TopicExpansionConfig {
     let ui = weak_ui.upgrade().unwrap();
     let expansions_config = get_expansion_config(&ui);
@@ -185,14 +197,7 @@ fn handle_expansion_change(weak_ui: Weak<AppWindow>) -> TopicExpansionConfig {
 fn handle_substitution_change(weak_ui: Weak<AppWindow>) -> HashMap<String, String> {
     let substitution_regex = regex!(r"^(.+) ?-> ?(.*)$");
     let ui = weak_ui.upgrade().unwrap();
-    let substitutions = ui.get_substitutions_text().lines()
-        .filter_map(|line| {
-            let captures = substitution_regex.captures(line)?;
-            Some((
-                captures[1].to_string(),
-                captures[2].to_string(),
-            ))
-        }).collect::<HashMap<_, _>>();
+    let substitutions = get_substitutions(&ui);
 
     // assign new substitutions to models.
     for topic in ui.get_topicListModel().iter() {
@@ -406,6 +411,31 @@ fn init_expansions(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, projec
     });
 }
 
+fn init_substitutions(ui: &AppWindow, project_dir: &ProjectDir) {
+    ui.global::<SubstitutionsActions>().on_substitutions_changed({
+        let ui_weak = ui.as_weak();
+        move || {
+            let ui = ui_weak.upgrade().unwrap();
+            let substitutions = get_substitutions(&ui);
+            // assign new substitutions to models.
+            for topic in ui.get_topicListModel().iter() {
+                let custom = topic.dialog_lines.as_any()
+                    .downcast_ref::<TopicModel>()
+                    .expect("Topic model was not custom type");
+
+                custom.set_substitutions(substitutions.clone());
+            }
+        }
+    });
+
+    let disk_substitutions = project_dir.load_substitutions().unwrap_or_default();
+    let substitutions_text = disk_substitutions.into_iter()
+        .map(|(target, replacement)| format!("{} -> {}", target, replacement))
+        .collect::<Vec<String>>()
+        .join("\n");
+    ui.set_substitutions_text(substitutions_text.to_shared_string());
+}
+
 fn init_generator(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, project_dir: &ProjectDir) {
     ui.set_topicListModel(topics_model.clone());
     ui.global::<FilePicking>().on_pick_wav_file(pick_wav_file);
@@ -451,6 +481,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     init_generator(&ui, &topics_model, &project_dir);
 
     init_expansions(&ui, &topics_model, &project_dir);
+    init_substitutions(&ui, &project_dir);
 
     let (progress_sender, cancellation_token) = init_receivers(&ui);
     init_generation(&ui, &progress_sender, &cancellation_token);
@@ -466,6 +497,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }else{
         eprintln!("Failed to parse chatterbox config, so cannot save it");
     }
+
+    project_dir.save_substitutions(get_substitutions(&ui))?;
 
     Ok(())
 }

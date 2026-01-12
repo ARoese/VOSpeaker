@@ -4,8 +4,8 @@ import { TopicList, TopicListItem, Audio } from "topics.slint";
 import { Progress, ProgressDisplay, ProgressActions } from "progress.slint";
 import { ExpansionsEditor } from "expansions.slint";
 import { Mappings, Expansion } from "expansions.slint";
-import { SubstitutionsEditor } from "substitutions.slint";
-export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings }
+import { SubstitutionsEditor, SubstitutionsActions } from "substitutions.slint";
+export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions }
 
 export component AppWindow inherits Window {
     in-out property <[TopicListItem]> topicListModel;

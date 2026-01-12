@@ -157,10 +157,6 @@ impl SubstitutedTopicLine {
             // NOTE: this could probably be improved using a generic expression and a sliding window
             let re = Regex::new(&format!(r"(?i)(?<prefix>[\s[:punct:]]*){}(?<suffix>[\s[:punct:]]*)", escaped)).unwrap();
             let replacement_rep = format!("${{prefix}}{}${{suffix}}", replacement);
-            if let Some(prefix) = re.captures(&working) {
-                let pref = &prefix["prefix"];
-                println!("{}", pref);
-            }
             working = re.replace_all(working.as_str(), &replacement_rep).to_string();
         }
         
