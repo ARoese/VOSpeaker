@@ -13,7 +13,7 @@ mod models;
 mod progress;
 
 use crate::chatterbox_generator::{ChatterboxGenerator, ChatterboxGeneratorConfig};
-use crate::dialog_generator::{ConfigHashable, DialogGenerator};
+use crate::dialog_generator::{ConfigHashable, DialogGenerationError, DialogGenerator};
 use crate::models::{MassGenerationOptions, TopicModel};
 use crate::progress::ProgressState::{Done, Inflight};
 use crate::progress::ProgressVal::{Determinate, Indeterminate};
@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use lazy_regex::regex;
 use tokio::sync::watch::Sender;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
 use crate::topic_lines::{SpokenTopicLine, TopicExpansionConfig};
@@ -58,37 +58,62 @@ fn format_path(p: SharedString) -> SharedString {
         .into()
 }
 
-// TODO: make this result for error prop
-async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line_idx: i32) -> Option<()> {
-    let config: ChatterboxGeneratorConfig = ui_weak.upgrade()?.get_genConfig().try_into().ok()?;
+/// simultaneously makes a UIError struct and prints the error to the console
+fn raise(reason: &str) -> UIError {
+    eprintln!("ERROR: {}", reason);
+    UIError {
+        message: reason.into(),
+    }
+}
 
-    let temp = ui_weak.upgrade()?
+/// makes a UIError struct
+fn make_error(message: &str) -> UIError {
+    UIError {
+        message: message.into()
+    }
+}
+
+// TODO: make this result for error prop
+async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line_idx: i32) -> Result<(), UIError> {
+    let ui = ui_weak.upgrade().unwrap();
+    let config: ChatterboxGeneratorConfig = ui.get_genConfig()
+        .try_into()
+        .map_err(|()| raise("Chatterbox config is invalid"))?;
+
+    let temp = ui
         .get_topicListModel()
-        .row_data(topic_idx as usize)?;
-    // TODO: is it ok to hold these strong references across async?
+        .row_data(topic_idx as usize)
+        .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", topic_idx)))?;
+
     let topic = temp.dialog_lines.as_any().downcast_ref::<TopicModel>()
         .expect("Topic model was not custom type");
-    let clean_line = SpokenTopicLine(topic.row_data(topic_idx as usize)?.clean_line.to_string());
-    let target_path = topic.audio_path(line_idx as usize)?;
 
-    // slightly naughty construction
+    // slightly naughty construction, but the model is casting from this anyways.
+    // TODO: this can be better done by holding and passing around an Rc to the underlying model, and using map models
+    let clean_line = SpokenTopicLine(
+        topic.row_data(topic_idx as usize)
+            .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", topic_idx)))?
+            .clean_line.to_string()
+    );
+    //let target_path = topic.audio_path(line_idx as usize)?;
+
+
     let vo_hash = clean_line.vo_hash();
     let config_hash = config.config_hash();
 
-    let result = ChatterboxGenerator::generate_dialog(config, clean_line).await;
+    let result = ChatterboxGenerator::generate_dialog(config, clean_line).await
+        .map_err(|e| make_error(&format!("{:?}", e)))?;
 
-    if let Ok(result) = result {
-        // TODO: naughty blocking call. The add_vo function should not be responsible for
-        // TODO: writing the wav file
-        topic.topic_dir.add_vo(&vo_hash, &config_hash, result).ok()?;
-        topic.wav_written_for(line_idx as usize);
-    }
-
-    Some(())
+    // TODO: naughty blocking call. The add_vo function should not be responsible for
+    // TODO: writing the wav file
+    topic.topic_dir.add_vo(&vo_hash, &config_hash, result)
+        .map_err(|err| make_error(&format!("Error writing vo file: {}", err)))?;
+    topic.wav_written_for(line_idx as usize);
+    Ok(())
 }
 
-async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, handle: &ProgressHandle, options: &MassGenerationOptions) -> Option<()> {
-    let ui = ui_weak.upgrade()?;
+async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, handle: &ProgressHandle, options: &MassGenerationOptions) -> Result<(), UIError> {
+    let ui = ui_weak.upgrade().expect("ui upgrade failed");
 
     for (i, topic_item) in ui.get_topicListModel().iter().enumerate() {
         let name = topic_item.topic_name.to_string();
@@ -109,31 +134,40 @@ async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, handle: &Progr
                 status: format!("Generating topic [{}]", name),
                 range: 0..num_to_generate as u64,
                 progress: num_generated,
-            })).ok()?;
+            })).expect("Progress sender failed prematurely");
 
-            generate_dialogue_future(ui_weak.clone(), i as i32, line_idx as i32).await?;
+            generate_dialogue_future(ui_weak.clone(), i as i32, line_idx as i32)
+                .await
+                .map_err(|e|
+                    make_error(&format!("Error when generating dialogue line ({}, {}): {}", i, line_idx, e.message))
+                )?;
             num_generated += 1;
         }
     }
 
-    handle.progress_sender.send(Done).ok()?;
+    handle.progress_sender.send(Done).expect("Progress sender closed prematurely");
 
-    Some(())
+    Ok(())
 }
 
 fn batch_generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, options: MassGenerationOptions) -> JoinHandle<()> {
     println!("batch generating dialogues");
 
     let future = Compat::new(async move {
-        batch_generate_dialogue_future(ui_weak, &handle, &options)
+        let result = batch_generate_dialogue_future(ui_weak, &handle, &options)
             .with_cancellation_token(&handle.cancellation)
             .await;
-        handle.progress_sender.send(Done).unwrap();
+
+        if let Some(Err(e)) = result {
+            handle.error_sender.send(e).await.expect("Error sender closed prematurely");
+        }
+        handle.progress_sender.send(Done).expect("Error sender closed prematurely");
     });
-    spawn_local(future).unwrap()
+    spawn_local(future).expect("Spawning of local future failed")
 }
 
 fn generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, topic_idx: i32, line_idx: i32) -> JoinHandle<()> {
+    // TODO: send errors
     println!("generation requested for {}:{}", topic_idx, line_idx);
 
     let ui_weak = ui_weak.clone();
@@ -142,8 +176,14 @@ fn generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, to
             Inflight(Indeterminate {status: "Generating dialogue".into()})
         ).ok();
 
-        generate_dialogue_future(ui_weak, topic_idx, line_idx)
+        let result = generate_dialogue_future(ui_weak, topic_idx, line_idx)
             .with_cancellation_token(&handle.cancellation).await;
+
+        if let Some(Err(e)) = result {
+            handle.error_sender
+                .send(make_error(&format!("Error when generating dialogue ({topic_idx}, {line_idx}): {}", e.message)))
+                .await.expect("Error sender closed prematurely");
+        }
 
         handle.progress_sender.send(Done).ok();
     });
@@ -211,15 +251,16 @@ fn handle_substitution_change(weak_ui: Weak<AppWindow>) -> HashMap<String, Strin
     substitutions
 }
 
-fn init_generation(ui: &AppWindow, progress_sender: &Sender<ProgressState>, cancellation_token: &Rc<RefCell<CancellationToken>>) {
+fn init_generation(ui: &AppWindow, error_sender: &mpsc::Sender<UIError>, progress_sender: &Sender<ProgressState>, cancellation_token: &Rc<RefCell<CancellationToken>>) {
     ui.global::<GenerationActions>().on_generate_dialogue({
         let ui_weak = ui.as_weak();
         let sender = progress_sender.clone();
+        let error_sender = error_sender.clone();
         let ct = cancellation_token.clone();
         move |topic_idx, line_idx| {
             generate_dialogue_action(
                 ui_weak.clone(),
-                ProgressHandle{ progress_sender: sender.clone(), cancellation: ct.borrow().clone() },
+                ProgressHandle{ error_sender: error_sender.clone(), progress_sender: sender.clone(), cancellation: ct.borrow().clone() },
                 topic_idx, line_idx
             );
         }
@@ -228,6 +269,7 @@ fn init_generation(ui: &AppWindow, progress_sender: &Sender<ProgressState>, canc
     ui.global::<GenerationActions>().on_mass_generate_dialogue({
         let ui_weak = ui.as_weak();
         let sender = progress_sender.clone();
+        let error_sender = error_sender.clone();
         let ct = cancellation_token.clone();
         move |regen_stale| {
             let current_config: Option<ChatterboxGeneratorConfig> = ui_weak
@@ -247,6 +289,7 @@ fn init_generation(ui: &AppWindow, progress_sender: &Sender<ProgressState>, canc
                 batch_generate_dialogue_action(
                     ui_weak.clone(),
                     ProgressHandle{
+                        error_sender: error_sender.clone(),
                         progress_sender: sender.clone(),
                         cancellation: ct.borrow().clone() },
                     options,
@@ -256,7 +299,7 @@ fn init_generation(ui: &AppWindow, progress_sender: &Sender<ProgressState>, canc
     });
 }
 
-fn init_receivers(ui: &AppWindow) -> (Sender<ProgressState>, Rc<RefCell<CancellationToken>>) {
+fn init_receivers(ui: &AppWindow) -> (mpsc::Sender<UIError>, Sender<ProgressState>, Rc<RefCell<CancellationToken>>) {
     let (progress_sender, mut progress_receiver) = watch::channel(Done);
     let cancellation_token = Rc::new(RefCell::new(CancellationToken::new()));
 
@@ -293,7 +336,39 @@ fn init_receivers(ui: &AppWindow) -> (Sender<ProgressState>, Rc<RefCell<Cancella
         }
     }).expect("failed to start progress watcher");
 
-    (progress_sender, cancellation_token)
+    let errors_model = Rc::new(VecModel::<UIError>::from(vec![
+        /*
+        UIError{
+            message: "test error 1".to_shared_string()
+        },
+        UIError{
+            message: "test error 2".to_shared_string()
+        },
+        UIError{
+            message: "test error 3".to_shared_string()
+        }
+         */
+    ]));
+    ui.set_errors(ModelRc::new(errors_model.clone().reverse()));
+    ui.global::<ErrorToastActions>().on_dismiss_error({
+        let model = errors_model.clone();
+        move |i| {
+            model.remove(model.row_count()-1 - i as usize);
+        }
+    });
+
+    let (error_sender, mut error_receiver) = mpsc::channel::<UIError>(20);
+    spawn_local({
+        async move {
+            while let Some(error) = error_receiver.recv().await {
+                // TODO: proper logging library
+                eprintln!("ERROR: {:?}", error);
+                errors_model.push(error);
+            }
+        }
+    }).expect("failed to start progress watcher");
+
+    (error_sender, progress_sender, cancellation_token)
 }
 
 fn init_dialogue_audio(ui: &AppWindow) {
@@ -402,12 +477,10 @@ fn init_expansions(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, projec
     });
 
     ui.global::<Mappings>().on_collapseSubstitutions(|to_collapse| {
-        let text_block = to_collapse.iter()
+        to_collapse.iter()
             .map(|s| s.to_string())
             .collect::<Vec<String>>()
-            .join("\n");
-        // ensure newline at the end so user doesn't have to fight the parses
-        format!("{}\n", text_block).into()
+            .join("\n").trim().into()
     });
 }
 
@@ -483,8 +556,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     init_expansions(&ui, &topics_model, &project_dir);
     init_substitutions(&ui, &project_dir);
 
-    let (progress_sender, cancellation_token) = init_receivers(&ui);
-    init_generation(&ui, &progress_sender, &cancellation_token);
+    let (error_sender, progress_sender, cancellation_token) = init_receivers(&ui);
+    init_generation(&ui, &error_sender, &progress_sender, &cancellation_token);
     init_dialogue_audio(&ui);
 
     ui.run()?;

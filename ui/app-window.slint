@@ -5,7 +5,8 @@ import { Progress, ProgressDisplay, ProgressActions } from "progress.slint";
 import { ExpansionsEditor } from "expansions.slint";
 import { Mappings, Expansion } from "expansions.slint";
 import { SubstitutionsEditor, SubstitutionsActions } from "substitutions.slint";
-export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions }
+import { UIError, ErrorToastActions, ErrorToasts } from "errors.slint";
+export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions, ErrorToastActions }
 
 export component AppWindow inherits Window {
     in-out property <[TopicListItem]> topicListModel;
@@ -14,6 +15,7 @@ export component AppWindow inherits Window {
     in-out property <[Expansion]> expansions;
     in-out property <int> allowed_expansions: 8;
     in-out property <string> substitutions_text;
+    in-out property <[UIError]> errors;
     title: "VOSpeaker";
     preferred-width: 800px;
     preferred-height: 600px;
@@ -73,6 +75,17 @@ export component AppWindow inherits Window {
                     clicked => {GenerationActions.mass_generate_dialogue(regen_stale)}
                 }
             }
+        }
+    }
+
+    HorizontalLayout {
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        ErrorToasts {
+            width: 60%;
+            height: 100%;
+            errors: errors;
         }
     }
 }

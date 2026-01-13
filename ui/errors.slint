@@ -1,0 +1,62 @@
+import {Palette, Button} from "std-widgets.slint";
+
+export struct UIError {
+    message: string
+}
+
+export global ErrorToastActions {
+    callback dismiss_error(int);
+}
+
+global ErrorColors {
+    in-out property <color> error-background: red;
+    in-out property <color> error-foreground: white;
+}
+
+export component ErrorToast inherits TouchArea {
+    callback closed();
+    in property <UIError> error;
+
+    Rectangle {
+        background: ErrorColors.error-background;
+        HorizontalLayout {
+            padding: 10px;
+            TouchArea {
+                clicked => {closed()}
+                Text{
+                    text: "X";
+                    color: ErrorColors.error-foreground;
+                }
+            }
+            Text {
+                text: "  ";
+            }
+            // TODO: make this copyable somehow
+            // TODO: maybe use textedit with input disallowed. It seems that is a more versitile way of displaying text
+            TextInput {
+                text: error.message;
+                wrap: word-wrap;
+                read-only: true;
+                accessible-item-selectable: true;
+                color: ErrorColors.error-foreground;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+
+}
+
+export component ErrorToasts inherits VerticalLayout {
+    in-out property <[UIError]> errors;
+    spacing: 5px;
+    padding: 10px;
+    Rectangle {
+        vertical-stretch: 1;
+    }
+    for error[i] in errors: ErrorToast {
+        horizontal-stretch: 1;
+        vertical-stretch: 0;
+        closed => {ErrorToastActions.dismiss_error(i)}
+        error: error;
+    }
+}

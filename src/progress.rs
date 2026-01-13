@@ -1,12 +1,14 @@
 use crate::progress::ProgressState::{Done, Inflight};
 use crate::progress::ProgressVal::{Determinate, Indeterminate};
-use crate::Progress;
+use crate::{Progress, UIError};
 use std::ops::Range;
+use tokio::sync::mpsc;
 use tokio::sync::watch::Sender as WatchSender;
 use tokio_util::sync::CancellationToken;
 
 pub struct ProgressHandle {
     pub progress_sender: WatchSender<ProgressState>,
+    pub error_sender: mpsc::Sender<UIError>,
     pub cancellation: CancellationToken
 }
 
