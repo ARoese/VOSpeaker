@@ -1,4 +1,4 @@
-import { ScrollView, Slider, Button } from "std-widgets.slint";
+import { ScrollView, Slider, Button, LineEdit } from "std-widgets.slint";
 component CfgSlider inherits VerticalLayout {
     in-out property<float> value;
     in property<string> name;
@@ -51,9 +51,9 @@ export component ChatterboxConfigView inherits VerticalLayout {
     ScrollView {
         VerticalLayout {
             alignment: start;
-            TextInput {
+            LineEdit {
                 text: config.endpoint;
-                accessible-placeholder-text: "localhost:9005";
+                placeholder-text: "localhost:9005";
                 changed text => {config.endpoint = self.text}
             }
             CfgSlider {
