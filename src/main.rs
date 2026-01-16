@@ -417,10 +417,12 @@ fn init_expansions(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, projec
     };
 
     let expand_config = generated_config.merge_with(&expand_config_disk);
-    let expansions: Vec<Expansion> = expand_config.expansions.iter().map(|(name, expansions)| Expansion{
+    let mut expansions = expand_config.expansions.iter().map(|(name, expansions)| Expansion{
         name: name.to_shared_string(),
         substitutions: ModelRc::new(VecModel::from(expansions.iter().map(|x| x.to_shared_string()).collect::<Vec<_>>())),
-    }).collect();
+    }).collect::<Vec<Expansion>>();
+    expansions.sort_by_key(|x| x.name.clone());
+    // TODO: this should be updated when topics are added/removed
 
     let expansions_model = ModelRc::new(VecModel::from(expansions));
     ui.set_expansions(expansions_model.clone());

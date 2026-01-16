@@ -163,22 +163,18 @@ fn without_leading_trailing_parens(line: &str) -> &str {
 #[derive(Debug, Clone)]
 pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
 impl SubstitutedTopicLine {
+
     fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
-        // TODO: This is ridiculously slow. Optimize.
-        let mut working = original.clone();
-        for (original, replacement) in substitutions {
-            let escaped = regex::escape(&original);
-            // match group 2 (unnamed) is the group to be replaced
-            // this unwrap will always succeed because we substitute an escaped literal
-            // this is a little slow due to compilation, but
-            // it's ok because we need the expressiveness
-            // NOTE: this could probably be improved using a generic expression and a sliding window
-            let re = Regex::new(&format!(r"(?i)(?<prefix>[\s[:punct:]]*){}(?<suffix>[\s[:punct:]]*)", escaped)).unwrap();
-            let replacement_rep = format!("${{prefix}}{}${{suffix}}", replacement);
-            working = re.replace_all(working.as_str(), &replacement_rep).to_string();
+        let lower_substitutions = substitutions.iter().map(|(k,v)| (k.to_lowercase(), v)).collect::<HashMap<_,_>>();
+        let mut exploded = original.split(' ').map(String::from).collect::<Vec<String>>();
+        for word in exploded.iter_mut() {
+            let lowercase_ver = word.to_lowercase();
+            if lower_substitutions.contains_key(lowercase_ver.as_str()) {
+                *word = lower_substitutions[&lowercase_ver].clone()
+            }
         }
         
-        working
+        exploded.join(" ")
     }
     pub fn spoken(&self, substitutions: &HashMap<String, String>) -> SpokenTopicLine {
         let trimmed = self.0.trim()
