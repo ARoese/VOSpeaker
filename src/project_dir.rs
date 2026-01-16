@@ -51,7 +51,10 @@ impl ProjectDir {
         Ok(toml::from_str::<TopicExpansionConfig>(&expansions_text)?)
     }
 
-    pub fn save_expansion_config(&self, config: TopicExpansionConfig) -> Result<(), Box<dyn ErrorTrait>> {
+    pub fn save_expansion_config(&self, mut config: TopicExpansionConfig) -> Result<(), Box<dyn ErrorTrait>> {
+        // do not save expansions with empty lists. Instead, let them be initialized as default upon reading
+        config.expansions = config.expansions.into_iter().filter(|(k,v)| !v.is_empty()).collect();
+
         let expansions_string = toml::to_string(&config)?;
         let expansions_path = self.path.join(Self::EXPANSIONS_CONF_NAME);
         Ok(fs::write(&expansions_path, expansions_string)?)
