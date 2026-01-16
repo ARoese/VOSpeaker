@@ -133,12 +133,8 @@ impl TopicModel {
         
         topic_dir.topic_file_ref().lines()
             .iter()
-            .map(ExplodedRawLine::from)
             .flat_map(|line|
-                line.0.iter().filter_map(|x| match x {
-                    ExplodedMember::RawText(_) => None,
-                    ExplodedMember::Substitute(name) => Some(name.to_string()),
-                }).collect::<HashSet<_>>()
+                line.0.global_names()
             ).collect::<HashSet<_>>()
         /*
         self.lines.borrow().iter()

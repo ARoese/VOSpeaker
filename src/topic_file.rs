@@ -27,7 +27,7 @@ fn read_topic_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
 
     let lines = lines
         .into_iter()
-        .map(|l| RawTopicLine(l))
+        .map(|l| RawTopicLine::new(&l))
         .collect();
     
     Ok(lines)

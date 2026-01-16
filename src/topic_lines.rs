@@ -34,37 +34,41 @@ pub enum ExplodedMember{
     Substitute(String)
 }
 
+pub fn explode_raw_line(line: &str) -> ExplodedRawLine {
+    let globals_regex = regex!(r"<(?:global|alias)=(.*?)>"i);
+
+    let mut elements: Vec<ExplodedMember> = Vec::new();
+    let mut source = line;
+    // capture a match
+    // shift its preceding text and the match onto the elements list
+    // consume the shifted portion of source
+    // repeat until there are no more matches
+    while let Some(capture) = globals_regex.captures(&source) {
+        let name = capture[1].to_string();
+        let capture_range = &capture.get_match().range();
+        if capture_range.start != 0 {
+            // add the preceding raw text
+            elements.push(RawText(source[..capture_range.start].to_string()));
+        }
+        // add the matched global
+        elements.push(Substitute(name));
+        // consume the portion parsed
+        source = &source[capture_range.end..];
+        // source.replace_range(..capture_range.end, "");
+    }
+
+    if source.len() != 0 {
+        elements.push(RawText(source.to_string()));
+    }
+
+    ExplodedRawLine(elements)
+}
+
 #[derive(Debug, Clone)]
 pub struct ExplodedRawLine(pub Vec<ExplodedMember>);
 impl ExplodedRawLine {
-
-    pub fn from(line: &RawTopicLine) -> ExplodedRawLine {
-        let globals_regex = regex!(r"<(?:global|alias)=(.*?)>"i);
-
-        let mut elements: Vec<ExplodedMember> = Vec::new();
-        let mut source = line.0.clone();
-        // capture a match
-        // shift its preceding text and the match onto the elements list
-        // consume the shifted portion of source
-        // repeat until there are no more matches
-        while let Some(capture) = globals_regex.captures(&source) {
-            let name = capture[1].to_string();
-            let capture_range = &capture.get_match().range();
-            if capture_range.start != 0 {
-                // add the preceding raw text
-                elements.push(ExplodedMember::RawText(source[..capture_range.start].to_string()));
-            }
-            // add the matched global
-            elements.push(ExplodedMember::Substitute(name));
-            // consume the portion parsed
-            source.replace_range(..capture_range.end, "");
-        }
-
-        if source.len() != 0 {
-            elements.push(ExplodedMember::RawText(source));
-        }
-
-        ExplodedRawLine(elements)
+    pub fn from_str(line: &str) -> ExplodedRawLine {
+        explode_raw_line(line)
     }
 
     pub fn implode(&self) -> String {
@@ -76,6 +80,16 @@ impl ExplodedRawLine {
 
     pub fn has_substitutions(&self) -> bool {
         self.0.iter().any(|e| matches!(e, Substitute(_)))
+    }
+
+    /// returns the set of all globals used in the line
+    pub fn global_names(&self) -> HashSet<String> {
+        self.0.iter().filter_map(|part|
+            match part {
+                RawText(_) => None,
+                Substitute(name) => Some(name.clone())
+            }
+        ).collect::<_>()
     }
 
     pub fn permute(&self, substitutions: &HashMap<String, Vec<String>>) -> Vec<String> {
@@ -114,18 +128,21 @@ impl ExplodedRawLine {
 }
 
 #[derive(Debug, Clone)]
-pub struct RawTopicLine(pub String);
+pub struct RawTopicLine(pub ExplodedRawLine);
 impl RawTopicLine {
+    pub fn new(str: &str) -> RawTopicLine {
+        RawTopicLine(ExplodedRawLine::from_str(str))
+    }
+
     pub fn substitute(&self, config: &TopicExpansionConfig) -> Vec<SubstitutedTopicLine> {
-        let exploded = ExplodedRawLine::from(self);
-        exploded
+        self.0
             .permute(&config.expansions)
             .into_iter()
             .collect::<HashSet<_>>()
             .into_iter()
             // limit expansions, but always take at least 1
             .take(max(1, config.max_expansions))
-            .map(|s| SubstitutedTopicLine(s, exploded.clone()))
+            .map(|s| SubstitutedTopicLine(s, self.0.clone()))
             .collect()
     }
 }
@@ -147,6 +164,7 @@ fn without_leading_trailing_parens(line: &str) -> &str {
 pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
 impl SubstitutedTopicLine {
     fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
+        // TODO: This is ridiculously slow. Optimize.
         let mut working = original.clone();
         for (original, replacement) in substitutions {
             let escaped = regex::escape(&original);
@@ -201,7 +219,7 @@ mod tests {
             "This is a dialogue line with no substitutions.",
             "This is a <alias=item> with a single substitution.",
             "This is a <global=item> with many <global=object>"
-        ].into_iter().map(|s| RawTopicLine(s.to_string())).collect();
+        ].into_iter().map(|s| RawTopicLine::new(s)).collect();
 
         let config = TopicExpansionConfig {
             expansions: hashmap!{
@@ -228,7 +246,7 @@ mod tests {
     fn test_substitutions() {
         let raw_lines: Vec<_> = vec![
             "(pre-text parens) This is a dialogue line with no substitutions. (post-text parens)",
-        ].into_iter().map(|s| RawTopicLine(s.to_string())).collect();
+        ].into_iter().map(|s| RawTopicLine::new(s)).collect();
 
         let config = TopicExpansionConfig {
             expansions: hashmap!{
