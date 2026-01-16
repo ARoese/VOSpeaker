@@ -11,10 +11,6 @@ pub struct ProjectDir {
     pub path: PathBuf
 }
 
-fn topics_path(path: &Path) -> PathBuf {
-    path.join("topics")
-}
-
 impl ProjectDir {
     pub fn new(path: &Path) -> Result<Self, Error> {
         if !path.is_dir() {
@@ -26,10 +22,15 @@ impl ProjectDir {
         })
     }
 
+    /// path to the topics subdir
+    pub fn topics_path(&self) -> PathBuf {
+        self.path.join("topics")
+    }
+
     /// this is very likely to fail if previously requested topic dirs weren't closed yet.
     /// make sure to drop the topic dirs provided before calling this function again
     pub fn get_topic_dirs(&self) -> Result<Vec<TopicDir>, Error> {
-        let topics_path = topics_path(&self.path);
+        let topics_path = self.topics_path();
         fs::create_dir_all(&topics_path)?;
 
         // TODO: logging

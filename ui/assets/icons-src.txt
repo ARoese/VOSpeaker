@@ -3,3 +3,5 @@ https://composables.com/icons/icon-libraries/font-awesome/play
 https://composables.com/icons/icon-libraries/lucide/audio-lines
 https://composables.com/icons/icon-libraries/font-awesome/redo
 https://composables.com/icons/icon-libraries/font-awesome/chevron-right
+https://composables.com/icons/icon-libraries/material-icons/add
+https://composables.com/icons/icon-libraries/material-icons/delete

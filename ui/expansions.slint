@@ -18,11 +18,22 @@ export component ExpansionEditor inherits VerticalLayout {
     in-out property <Expansion> expansion;
     callback expansion_changed([string]);
 
-    TextEdit {
+    property <bool> update-pending: false;
+    update-timer := Timer {
+        interval: 1s;
+        running: update-pending;
+        triggered => {
+            expansion_changed(Mappings.parseSubstitutions(te.text));
+            update-pending = false;
+        }
+    }
+
+    te := TextEdit {
         text: Mappings.collapseSubstitutions(expansion.substitutions);
         placeholder-text: "Jack\nJohn\nJill";
         edited(text) => {
-            expansion_changed(Mappings.parseSubstitutions(text));
+            update-pending = true;
+            update-timer.restart();
         }
     }
 }

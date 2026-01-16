@@ -16,6 +16,9 @@ export component AppWindow inherits Window {
     in-out property <int> allowed_expansions: 8;
     in-out property <string> substitutions_text;
     in-out property <[UIError]> errors;
+
+    callback add_topic_from_path();
+    callback remove_topic(int);
     title: "VOSpeaker";
     preferred-width: 800px;
     preferred-height: 600px;
@@ -50,6 +53,8 @@ export component AppWindow inherits Window {
                 }
                 TopicList {
                     model <=> topicListModel;
+                    add_topic_from_path => {add_topic_from_path()}
+                    remove_topic(idx) => {remove_topic(idx)}
                 }
             }
 

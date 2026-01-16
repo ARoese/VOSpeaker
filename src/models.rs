@@ -6,13 +6,14 @@ use slint::{Model, ModelNotify, ModelTracker};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::path::PathBuf;
 
 type SubstitutionsMap = HashMap<String, String>;
 
 pub struct TopicModel {
     // this is still required since we need to add mutation functions later
-    pub topic_dir: TopicDir,
+    pub topic_dir: RefCell<Option<TopicDir>>,
     substitutions: RefCell<SubstitutionsMap>,
     expansion_config: RefCell<TopicExpansionConfig>,
     lines: RefCell<Vec<SubstitutedTopicLine>>,
@@ -29,7 +30,7 @@ impl TopicModel {
         let expanded_lines = Self::compute_expanded_lines(&topic_dir, &expansions, &substitutions);
         TopicModel {
             lines: expanded_lines.into(),
-            topic_dir,
+            topic_dir: Some(topic_dir).into(),
             notify: Default::default(),
             substitutions: substitutions.into(),
             expansion_config: expansions.into()
@@ -44,31 +45,42 @@ impl TopicModel {
     }
 
     pub fn set_expansion_config(&self, new_expansions: TopicExpansionConfig){
-        self.expansion_config.replace(new_expansions);
-        self.lines.replace(Self::compute_expanded_lines(
-            &self.topic_dir,
-            &self.expansion_config.borrow(),
-            &self.substitutions.borrow()
-        ));
-        self.notify.reset(); // this will also greatly change the model
+        if let Some(topic_dir) = self.topic_dir.borrow().deref() {
+            self.expansion_config.replace(new_expansions);
+            self.lines.replace(Self::compute_expanded_lines(
+                topic_dir,
+                &self.expansion_config.borrow(),
+                &self.substitutions.borrow()
+            ));
+            self.notify.reset(); // this will also greatly change the model
+        }
     }
 
     fn make_model_type(&self, line_idx: usize) -> Option<TopicDialogLine> {
         let lines_ref = self.lines.borrow();
         let line = lines_ref.get(line_idx)?;
+        let borrow = self.topic_dir.borrow();
+        let topic_dir = borrow.as_ref()?;
         Some(TopicDialogLine {
             substituted_line: line.0.clone().into(),
             clean_line: line.spoken(&self.substitutions.borrow()).0.into(),
-            can_play: self.topic_dir.wav_path(&line.spoken(&self.substitutions.borrow()).vo_hash()).exists()
+            can_play: topic_dir.wav_path(&line.spoken(&self.substitutions.borrow()).vo_hash()).exists()
         })
     }
 
     pub fn should_generate(&self, line_idx: usize, options: &MassGenerationOptions) -> bool {
+        let borrow = self.topic_dir.borrow();
+        let topic_dir = if let Some(topic_dir) = borrow.deref() {
+            topic_dir
+        }else{
+            return false;
+        };
+
         // don't generate if the line doesn't exist
         self.lines.borrow().get(line_idx).map_or(false, |line| {
             let clean_line = line.spoken(&self.substitutions.borrow());
             let vo_hash = clean_line.vo_hash();
-            let config_hash = self.topic_dir.get_config_hash(&vo_hash);
+            let config_hash = topic_dir.get_config_hash(&vo_hash);
 
             if let Some(config_hash) = config_hash {
                 if let Some(current_config_hash) = options.current_config_hash {
@@ -100,7 +112,7 @@ impl TopicModel {
 
     pub fn audio_path(&self, line: usize) -> Option<PathBuf> {
         let vo_line = self.lines.borrow().get(line)?.clone();
-        Some(self.topic_dir.wav_path(&vo_line.spoken(&self.substitutions.borrow()).vo_hash()))
+        Some(self.topic_dir.borrow().as_ref()?.wav_path(&vo_line.spoken(&self.substitutions.borrow()).vo_hash()))
     }
     
     pub fn line(&self, line_idx: usize) -> Option<SubstitutedTopicLine> {
@@ -112,8 +124,14 @@ impl TopicModel {
     }
 
     pub fn collect_globals(&self) -> HashSet<String> {
-        self.topic_dir
-            .topic_file_ref().lines()
+        let borrow = self.topic_dir.borrow();
+        let topic_dir = if let Some(topic_dir) = borrow.deref() {
+            topic_dir
+        }else{
+            return Default::default();
+        };
+        
+        topic_dir.topic_file_ref().lines()
             .iter()
             .map(ExplodedRawLine::from)
             .flat_map(|line|

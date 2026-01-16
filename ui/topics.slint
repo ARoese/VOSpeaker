@@ -1,4 +1,4 @@
-import { Button, ListView, Palette } from "std-widgets.slint";
+import { Button, ListView, Palette, Spinner, ScrollView } from "std-widgets.slint";
 import { GenerationActions } from "generator.slint";
 export struct TopicDialogLine {
     substituted_line: string,
@@ -21,6 +21,7 @@ component TopicListItemView inherits VerticalLayout {
     callback expand_clicked();
     callback generate_audio(int);
     callback play_audio(int);
+    callback delete_topic();
 
     Rectangle {
         height: 30px;
@@ -50,7 +51,38 @@ component TopicListItemView inherits VerticalLayout {
                     text: item.topic-name;
                     color: Palette.alternate-foreground;
                 }
+
+                delete-cooloff-spinner := Spinner {
+                    //TODO: make this not bounce back to 0 before disappearing. Disappear when it hits max
+                    //visible: can-delete;
+                    progress: delete-spinner-progress;
+                }
+                delete-button := Button {
+                    text: "Delete";
+                    colorize-icon: true;
+                    icon: @image-url("assets/delete.svg");
+                    clicked => {
+                        if (can-delete) {
+                            delete_topic();
+                        }else{
+                            can-delete = true;
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    property <bool> can-delete: false;
+    property <float> delete-spinner-progress: can-delete ? 100% : 0%;
+    animate delete-spinner-progress {
+        duration: 300ms;
+    }
+    delete-window-timer := Timer {
+        interval: 300ms;
+        running: can-delete;
+        triggered => {
+            can-delete = false;
         }
     }
 
@@ -102,6 +134,8 @@ component TopicListItemView inherits VerticalLayout {
 }
 
 export component TopicList inherits VerticalLayout {
+    callback add_topic_from_path();
+    callback remove_topic(int);
     in-out property <[TopicListItem]> model: [
         {
             topic_name: "topic 1",
@@ -152,14 +186,27 @@ export component TopicList inherits VerticalLayout {
     // one is not selected
     if expanded_index < 0 || expanded_index >= model.length: Rectangle {
         VerticalLayout {
-            alignment: start;
-            for data[i] in model: TopicListItemView {
-               item: data;
-               expanded: false;
-               expand_clicked => {
-                   expanded_index = i
-               }
-           }
+            ScrollView {
+                VerticalLayout {
+                    spacing: 5px;
+                    alignment: start;
+                    for data[i] in model: TopicListItemView {
+                       item: data;
+                       expanded: false;
+                       expand_clicked => {
+                           expanded_index = i
+                       }
+                       delete_topic => {remove_topic(i)}
+                    }
+                }
+            }
+            Button {
+                text: "Add topic";
+                icon: @image-url("assets/add.svg");
+                colorize-icon: true;
+                horizontal-stretch: 0;
+                clicked => {add_topic_from_path()}
+            }
         }
     }
 }

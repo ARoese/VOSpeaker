@@ -34,16 +34,24 @@ impl TopicDir {
 
     /// take a topic file, construct a new TopicDir, and attach to it
     pub fn create_new(path: &Path, topic_file_path: &Path) -> Result<Self, Error> {
-        if !path.is_dir() {
-            return Err(Error::new(ErrorKind::InvalidInput, "path is not a directory"));
+        if path.exists() {
+            return Err(Error::new(ErrorKind::InvalidInput, format!("'{}' already exists. Use a different name.", path.to_string_lossy())));
         }
 
-        fs::create_dir_all(path)?;
-        let target_topic_file_path = topic_file(path);
-        fs::copy(&topic_file_path, &target_topic_file_path)?;
+        let res = {
+            fs::create_dir_all(path)?;
+            let target_topic_file_path = topic_file(path);
+            fs::copy(&topic_file_path, &target_topic_file_path)?;
 
-        // the target is now valid; attach to it as normal
-        Self::new(path)
+            // the target is now valid; attach to it as normal
+            Self::new(path)
+        };
+
+        if res.is_err() {
+            fs::remove_dir_all(path)?;
+        }
+
+        res
     }
 
     /// get the path to the wav file associated with the given VOHash. 
