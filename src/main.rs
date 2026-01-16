@@ -360,7 +360,7 @@ fn init_receivers(ui: &AppWindow) -> (mpsc::Sender<UIError>, Sender<ProgressStat
         }
     });
 
-    let (error_sender, mut error_receiver) = mpsc::channel::<UIError>(20);
+    let (error_sender, mut error_receiver) = mpsc::channel::<UIError>(128);
     spawn_local({
         async move {
             while let Some(error) = error_receiver.recv().await {
