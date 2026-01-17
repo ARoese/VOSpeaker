@@ -92,8 +92,8 @@ async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line
     // slightly naughty construction, but the model is casting from this anyways.
     // TODO: this can be better done by holding and passing around an Rc to the underlying model, and using map models
     let clean_line = SpokenTopicLine(
-        topic.row_data(topic_idx as usize)
-            .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", topic_idx)))?
+        topic.row_data(line_idx as usize)
+            .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", line_idx)))?
             .clean_line.to_string()
     );
     //let target_path = topic.audio_path(line_idx as usize)?;

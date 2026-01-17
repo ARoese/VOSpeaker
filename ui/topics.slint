@@ -57,18 +57,19 @@ component TopicListItemView inherits VerticalLayout {
                     //visible: can-delete;
                     progress: delete-spinner-progress;
                 }
-                delete-button := Button {
-                    text: "Delete";
-                    colorize-icon: true;
-                    icon: @image-url("assets/delete.svg");
-                    clicked => {
-                        if (can-delete) {
-                            delete_topic();
-                        }else{
-                            can-delete = true;
+                if !expanded:
+                    delete-button := Button {
+                        text: "Delete";
+                        colorize-icon: true;
+                        icon: @image-url("assets/delete.svg");
+                        clicked => {
+                            if (can-delete) {
+                                delete_topic();
+                            }else{
+                                can-delete = true;
+                            }
                         }
                     }
-                }
             }
         }
     }
@@ -174,11 +175,11 @@ export component TopicList inherits VerticalLayout {
             expanded_index = -1
         }
         play_audio(line_no) => {
-            debug("playing dialogue");
+            //debug("playing dialogue");
             Audio.play_dialog(expanded_index,line_no)
         }
         generate_audio(line_no) => {
-            debug("generating");
+            //debug("generating");
             GenerationActions.generate_dialogue(expanded_index, line_no)
         }
     }
