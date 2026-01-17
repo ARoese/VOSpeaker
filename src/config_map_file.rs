@@ -5,6 +5,36 @@ use std::path::{Path, PathBuf};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crate::hashes::{ConfigHash, VOHash, HASH_LEN};
 
+/*
+    # configMap.bin file format specification:
+    ## struct pseudocode
+    struct ConfigMapFile {
+        u32_be hash_length
+        HashPair<hash_length>[]
+    }
+
+    struct HashPair<L: u32_be> {
+        Hash<L> vo_hash
+        Hash<L> config_hash
+    }
+
+    struct Hash<L: u32_be> {
+        u8[L] hash
+    }
+    ## explanation
+    The file type is a simple list of vo_hash -> config_hash mappings. The hash length is stored
+    at the start of the file, and the remainder of the file is made out of the pairs. 
+    
+    The file represents a mapping, but for efficiency reasons, it is possible for the same vo_hash to appear
+    multiple times. In this scenario, the last appearance should be considered the valid mapping.
+    Writing a new vo_hash mapping to the file does NOT require removing any old
+    instances of that vo_hash. Appending the new mapping to the file is sufficient, and a compliant
+    implementation will ignore previous appearances when reading.
+    
+    Reading the file by inserting of each pair into a hashmap in the order they appear in the file
+    is a valid procedure.. 
+ */
+
 /// squish when this percentage of the entries are duplicates
 pub const SQUISH_LOAD: f32 = 0.3;
 
