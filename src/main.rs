@@ -11,6 +11,8 @@ mod chatterbox_generator;
 mod hashes;
 mod models;
 mod progress;
+mod create_fuz;
+mod static_resources;
 
 use crate::chatterbox_generator::{ChatterboxGenerator, ChatterboxGeneratorConfig};
 use crate::dialog_generator::{ConfigHashable, DialogGenerationError, DialogGenerator};
@@ -35,6 +37,7 @@ use tokio::sync::watch::Sender;
 use tokio::sync::{mpsc, watch};
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
+use crate::static_resources::{deinit_resources_dir, init_resources_dir};
 use crate::topic_dir::TopicDir;
 use crate::topic_lines::{SpokenTopicLine, TopicExpansionConfig};
 
@@ -623,6 +626,7 @@ fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &mpsc
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    init_resources_dir();
     let ui = AppWindow::new()?;
 
     let project_dir = Rc::from(ProjectDir::new(
@@ -657,5 +661,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     project_dir.save_substitutions(get_substitutions(&ui))?;
 
+    deinit_resources_dir();
     Ok(())
 }

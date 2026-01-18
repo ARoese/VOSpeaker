@@ -23,6 +23,10 @@ project_name/
 │  │  └─ ae7dc5e7ebb805ff.wav
 ```
 
+### Potential future changes:
+normalize generated audio into the flac format. This is a compressed lossless format and thus will be
+significantly smaller than the wav files.
+
 each wav file is named by the hash of the voiceline it represents. The text hashed is the text passed to the VO generator.
 Different words = different file name. This can be opaque and prevents issues with long file names.
 
@@ -60,3 +64,18 @@ dialog has 3 forms:
    - `I have completed the quest at Rorikstead for the yarl. (500 gold)` (Jarl -> yarl)
    - Some portions of text shouldn't be spoken, and will be removed when sent to the VO generator
    - `I have completed the quest at Rorikstead for the yarl.`
+
+## Export to fuz process:
+1. make wav file with bits per sample=16
+2. create .xwm file
+   1. `xWMAEncode.exe "C:\input.wav" "C:\output.xwm"`
+3. create .lip file
+   1. `FaceFXWrapper.exe "Skyrim" "USEnglish" "C:\FonixData.cdf" "C:\input.wav" "C:\input_resampled.wav" "C:\output.lip" "Clean text spoken by the model"`
+      - I don't know what the resampling process actually does; it seems to be built into the faceFx interface, which doesn't have clear documentation. I.E. I can't guarantee that it's just keeping the wav to 16 bits per sample.
+3. combine .xwm and .lip file into a .fuz file using xwmaencode.exe
+   4. `BmlFuzEncode.exe "C:\output.fuz" "C:\input.xwm" "C:\input.lip"`
+      - The lip file is not necessary if `-nolip` is passed in its place
+
+### WINE notes:
+   The conversion to .fuz files uses several programs via wine. This requires a valid wine prefix with MVSC and wine-mono installed.
+   Setting this up automatically may later be added as a feature. If you're using Linux, you will probably already have a good wine setup anyways.
