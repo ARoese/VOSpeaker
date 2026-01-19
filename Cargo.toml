@@ -23,6 +23,7 @@ tokio-util = "0.7.17"
 idx = "0.2.0"
 static-files = "0.3.1"
 tempfile = "3.21.0"
+log = "0.4.29"
 
 [build-dependencies]
 slint-build = "1.14.1"

@@ -11,6 +11,7 @@ dependencies = [
  "byteorder",
  "idx",
  "lazy-regex",
+ "log",
  "maplit",
  "md5",
  "rfd",

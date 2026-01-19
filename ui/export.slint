@@ -1,0 +1,80 @@
+import { Palette, ComboBox, CheckBox, Button } from "std-widgets.slint";
+
+export enum FolderNamingPolicy {
+    ExactSpokenDialogue,
+    FormattedSpokenDialogue,
+    ExactExpandedDialogue,
+    FormattedExpandedDialogue,
+    MD5Hash
+}
+
+export struct FolderExportOptions {
+    group_by_topic: bool,
+    topic_suffix: bool,
+    naming_policy: FolderNamingPolicy
+}
+
+export component FolderExportDialogue inherits Window {
+    property <FolderExportOptions> export_options;
+    callback do_export(FolderExportOptions);
+    title: "Export to Folder";
+    preferred-height: 300px;
+    preferred-width: 450px;
+    Rectangle {
+        background: Palette.background;
+
+        VerticalLayout {
+            Text {
+                vertical-stretch: 1;
+                wrap: TextWrap.word-wrap;
+                text: @tr("Group by Topic: If Selected, the export folder will contain a subdirectory for each topic file.\nTopic Suffix: If selected, topic subdirectories will be named as *.topic.d. Otherwise, only the base name will be used.\n\nNaming Policy: Determines how audio files are named in the export.\n    - Exact Spoken Dialogue: Name is the exact string passed to the generator.\n    - Formatted Spoken Dialogue: Name is as in Exact Spoken Dialogue, but mangled for DBVO.\n    - Expanded Dialogue: Name is the expanded dialogue line.\n    * Formatted Expanded Dialogue: Name is as in Expanded Dialogue, but mangled for DBVO. (this is probably what you want)\n    - MD5 Hash: Named by the MD5 hash of the exact spoken dialogue. (internal representation)\n\nSoon: Audio Format: WAV, MP3, ETC.\n\n");
+            }
+            VerticalLayout {
+                Text {
+                    text: "Naming Policy";
+                }
+                naming_policy_cb := ComboBox {
+                    model: ["Exact Spoken Dialogue", "Formatted Spoken Dialogue", "Exact Expanded Dialogue", "Formatted Expanded Dialogue", "MD5 Hash"];
+                    current-index: 3;
+                }
+            }
+            VerticalLayout {
+                group_by_topic_checkbox := CheckBox {
+                    text: "Group by Topic";
+                    checked: true;
+                }
+            }
+            VerticalLayout {
+                topic_suffix_checkbox := CheckBox {
+                    text: "Topic Suffix";
+                    checked: true;
+                    visible: group_by_topic_checkbox.checked;
+                }
+            }
+            Button {
+                text: "Export";
+                clicked => {
+                    export_options.group-by-topic = group_by_topic_checkbox.checked;
+                    export_options.topic-suffix = topic_suffix_checkbox.checked;
+                    if(naming_policy_cb.current-index == 0){
+                        export_options.naming-policy = FolderNamingPolicy.ExactSpokenDialogue;
+                    }
+                    if(naming_policy_cb.current-index == 1){
+                        export_options.naming-policy = FolderNamingPolicy.FormattedSpokenDialogue;
+                    }
+                    if(naming_policy_cb.current-index == 2){
+                        export_options.naming-policy = FolderNamingPolicy.ExactExpandedDialogue;
+                    }
+                    if(naming_policy_cb.current-index == 3){
+                        export_options.naming-policy = FolderNamingPolicy.FormattedExpandedDialogue;
+                    }
+                    if(naming_policy_cb.current-index == 4){
+                        export_options.naming-policy = FolderNamingPolicy.MD5Hash;
+                    }
+
+                    do_export(export_options);
+                }
+            }
+        }
+    }
+}

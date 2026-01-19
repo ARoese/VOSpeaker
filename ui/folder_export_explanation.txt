@@ -1,0 +1,12 @@
+Group by Topic: If Selected, the export folder will contain a subdirectory for each topic file.
+Topic Suffix: If selected, topic subdirectories will be named as *.topic.d. Otherwise, only the base name will be used.
+
+Naming Policy: Determines how audio files are named in the export.
+    - Exact Spoken Dialogue: Name is the exact string passed to the generator.
+    - Formatted Spoken Dialogue: Name is as in Exact Spoken Dialogue, but mangled for DBVO.
+    - Expanded Dialogue: Name is the expanded dialogue line.
+    * Formatted Expanded Dialogue: Name is as in Expanded Dialogue, but mangled for DBVO. (this is probably what you want)
+    - MD5 Hash: Named by the MD5 hash of the exact spoken dialogue. (internal representation)
+
+Soon: Audio Format: WAV, MP3, ETC.
+

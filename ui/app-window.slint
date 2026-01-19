@@ -6,7 +6,12 @@ import { ExpansionsEditor } from "expansions.slint";
 import { Mappings, Expansion } from "expansions.slint";
 import { SubstitutionsEditor, SubstitutionsActions } from "substitutions.slint";
 import { UIError, ErrorToastActions, ErrorToasts } from "errors.slint";
-export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions, ErrorToastActions }
+import { FolderExportDialogue } from "export.slint";
+export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions, ErrorToastActions, FolderExportDialogue }
+
+export global Dialogs {
+    callback show_export_to_folder();
+}
 
 export component AppWindow inherits Window {
     in-out property <[TopicListItem]> topicListModel;
@@ -22,75 +27,95 @@ export component AppWindow inherits Window {
     title: "VOSpeaker";
     preferred-width: 800px;
     preferred-height: 600px;
-    Rectangle {
-        background: Palette.background;
-        VerticalLayout {
-            HorizontalBox {
-                vertical-stretch: 1;
-
-                VerticalLayout {
-                    width: 30%;
-                    ChatterboxConfigView {
-                        config <=> genConfig;
-                        height:40%;
-                    }
-                    TabWidget {
-                        height: 60%;
-                        Tab {
-                            title: "Expansions";
-                            ExpansionsEditor {
-                                expansions <=> expansions;
-                                allowed_expansions <=> allowed_expansions;
-                            }
-                        }
-                        Tab {
-                            title: "Substitutions";
-                            SubstitutionsEditor {
-                                substitutionsText <=> substitutions_text;
-                            }
-                        }
+    MenuBar {
+        Menu {
+            title: "Project";
+            Menu {
+                title: "Export to...";
+                MenuItem {
+                    title: "Folder";
+                    activated => {
+                        Dialogs.show_export_to_folder();
                     }
                 }
-                TopicList {
-                    model <=> topicListModel;
-                    add_topic_from_path => {add_topic_from_path()}
-                    remove_topic(idx) => {remove_topic(idx)}
-                }
-            }
-
-            if progress.active: ProgressDisplay {
-                vertical-stretch: 0;
-                progress <=> progress;
-            }
-
-            property <bool> regen_stale;
-            if !progress.active: HorizontalLayout {
-
-                Text {
-                    text: "Mass generation";
-                    horizontal-stretch: 0;
-                }
-                CheckBox {
-                    text: "Regenerate stale lines";
-                    checked <=> regen_stale;
-                }
-                Button {
-                    horizontal-stretch: 0;
-                    text: "Mass Generation";
-                    clicked => {GenerationActions.mass_generate_dialogue(regen_stale)}
+                MenuItem {
+                    title: "DBVO mod";
                 }
             }
         }
     }
-
-    HorizontalLayout {
+    VerticalLayout {
         Rectangle {
+            background: Palette.background;
+            vertical-stretch: 1;
             horizontal-stretch: 1;
-        }
-        ErrorToasts {
-            width: 60%;
-            height: 100%;
-            errors: errors;
+            VerticalLayout {
+                HorizontalBox {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        width: 30%;
+                        ChatterboxConfigView {
+                            config <=> genConfig;
+                            height:40%;
+                        }
+                        TabWidget {
+                            height: 60%;
+                            Tab {
+                                title: "Expansions";
+                                ExpansionsEditor {
+                                    expansions <=> expansions;
+                                    allowed_expansions <=> allowed_expansions;
+                                }
+                            }
+                            Tab {
+                                title: "Substitutions";
+                                SubstitutionsEditor {
+                                    substitutionsText <=> substitutions_text;
+                                }
+                            }
+                        }
+                    }
+                    TopicList {
+                        model <=> topicListModel;
+                        add_topic_from_path => {add_topic_from_path()}
+                        remove_topic(idx) => {remove_topic(idx)}
+                    }
+                }
+
+                if progress.active: ProgressDisplay {
+                    vertical-stretch: 0;
+                    progress <=> progress;
+                }
+
+                property <bool> regen_stale;
+                if !progress.active: HorizontalLayout {
+
+                    Text {
+                        text: "Mass generation";
+                        horizontal-stretch: 0;
+                    }
+                    CheckBox {
+                        text: "Regenerate stale lines";
+                        checked <=> regen_stale;
+                    }
+                    Button {
+                        horizontal-stretch: 0;
+                        text: "Mass Generation";
+                        clicked => {GenerationActions.mass_generate_dialogue(regen_stale)}
+                    }
+                }
+            }
+            HorizontalLayout {
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                ErrorToasts {
+                    width: 60%;
+                    height: 100%;
+                    errors: errors;
+                }
+            }
         }
     }
 }

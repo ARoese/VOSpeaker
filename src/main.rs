@@ -19,15 +19,16 @@ use crate::dialog_generator::{ConfigHashable, DialogGenerationError, DialogGener
 use crate::models::{MassGenerationOptions, TopicModel};
 use crate::progress::ProgressState::{Done, Inflight};
 use crate::progress::ProgressVal::{Determinate, Indeterminate};
-use crate::progress::{ProgressHandle, ProgressState};
+use crate::progress::{ProgressHandle, ProgressState, ProgressVal};
 use crate::project_dir::ProjectDir;
 use async_compat::Compat;
 use rodio::Sink;
-use slint::{spawn_local, CloseRequestResponse, JoinHandle, Model, ModelRc, SharedString, ToSharedString, VecModel, Weak};
+use slint::{run_event_loop, spawn_local, CloseRequestResponse, JoinHandle, Model, ModelRc, SharedString, ToSharedString, VecModel, Weak};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::ffi::OsStr;
+use std::fs;
 use std::fs::File;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -37,6 +38,7 @@ use tokio::sync::watch::Sender;
 use tokio::sync::{mpsc, watch};
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
+use log::error;
 use crate::static_resources::{deinit_resources_dir, init_resources_dir};
 use crate::topic_dir::TopicDir;
 use crate::topic_lines::{SpokenTopicLine, TopicExpansionConfig};
@@ -305,7 +307,9 @@ fn init_generation(ui: &AppWindow, error_sender: &mpsc::Sender<UIError>, progres
     });
 }
 
-fn init_receivers(ui: &AppWindow) -> (mpsc::Sender<UIError>, Sender<ProgressState>, Rc<RefCell<CancellationToken>>) {
+type ProgressSender = Sender<ProgressState>;
+type ErrorSender = mpsc::Sender<UIError>;
+fn init_receivers(ui: &AppWindow) -> (ErrorSender, ProgressSender, Rc<RefCell<CancellationToken>>) {
     let (progress_sender, mut progress_receiver) = watch::channel(Done);
     let cancellation_token = Rc::new(RefCell::new(CancellationToken::new()));
 
@@ -625,6 +629,142 @@ fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &mpsc
     topics_model
 }
 
+struct PackedDialogues {
+    pub export_to_folder: FolderExportDialogue
+}
+
+fn format_as_file(name: String) -> String {
+    // TODO: This incurs a severe performance penalty because of the regex matching.
+    // TODO: It isn't super critical, but it should be optimized.
+    /*
+    // This is what Absolute Phoenix does, and I trust that for now
+    ```Jave
+        String result = data.replaceAll("[\\\\/:*?\"<>|]", "_");
+        result = result.replaceAll(" ", "_");
+        result = result.replaceAll("(_?\\([^)]*\\))+\\s*$", "");
+    ```
+     */
+    let replace_with_underscore = regex!("[\\\\/:*?\"<>|]");
+    let remove = regex!("(_?\\([^)]*\\))+\\s*$");
+    let name = replace_with_underscore.replace_all(&name, "_");
+    let name = remove.replace_all(&name, "");
+    name.to_string()
+}
+
+async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options: &FolderExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+    let export_folder = rfd::FileDialog::new()
+        .set_title("Select Export Folder")
+        .pick_folder();
+    if export_folder.is_none() { return Ok(()); }
+    let export_folder = export_folder.unwrap();
+
+    let file_count = fs::read_dir(export_folder.clone())
+        .map_err(|_| make_error(&format!("The folder '{}' could not be accessed.", export_folder.to_string_lossy())))?
+        .count();
+    if file_count > 0 {
+        return Err(make_error(&format!("The folder '{}' is not empty.", export_folder.to_string_lossy())));
+    }
+
+    for topic in topics_model.iter() {
+        let topic_model = topic.dialog_lines
+            .as_any()
+            .downcast_ref::<TopicModel>()
+            .expect("Topic model was not of custom type");
+
+        let num_dialogues = topic_model.row_count();
+        let changed_err = make_error("Model changed when exporting.");
+        let export_file_root = if options.group_by_topic {
+            let sub_folder = export_folder.join(&topic.topic_name);
+            if options.topic_suffix {
+                sub_folder.with_extension("topic.d")
+            }else{
+                sub_folder
+            }
+        } else {
+            export_folder.clone()
+        };
+
+        tokio::fs::create_dir_all(&export_file_root).await
+            .map_err(|e| make_error(&format!("Failed to create topic subdir '{}': {e:?}", export_file_root.to_string_lossy())))?;
+
+        for i in 0..num_dialogues {
+            let src = topic_model.audio_path(i).ok_or(changed_err.clone())?;
+            if !src.exists() {
+                continue;
+            }
+
+            let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
+            let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
+            let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
+            let file_name = match options.naming_policy {
+                FolderNamingPolicy::ExactSpokenDialogue => { data.clean_line.to_string() }
+                FolderNamingPolicy::FormattedSpokenDialogue => { format_as_file(data.clean_line.to_string()) }
+                FolderNamingPolicy::ExactExpandedDialogue => { expanded.0.clone() }
+                FolderNamingPolicy::FormattedExpandedDialogue => { format_as_file(expanded.0.clone()) }
+                FolderNamingPolicy::MD5Hash => { hash.to_string() }
+            };
+
+            let dest = export_file_root.join(&file_name).with_added_extension("wav");
+            // report progress
+            let progress = Inflight(Determinate {
+                status: format!("Exporting '{}'", topic.topic_name),
+                range: 0..num_dialogues as u64,
+                progress: i as u64,
+            });
+            progress_sender.send(progress).expect("failed to send progress");
+            tokio::fs::copy(&src, &dest).await
+                .map_err(|e| make_error(&format!("Failed to copy '{}' to '{}': {e:?}", src.to_string_lossy(), dest.to_string_lossy())))?;
+            //ProgressState::Inflight(ProgressVal::Determinate {})
+        }
+    }
+
+    Ok(())
+}
+
+fn init_export(ui: &AppWindow, topics_model: &Rc<VecModel<TopicListItem>>, progress_sender: &ProgressSender, error_sender: &ErrorSender) -> Result<PackedDialogues, Box<dyn Error>> {
+    let export_to_folder = FolderExportDialogue::new()?;
+
+    ui.global::<Dialogs>().on_show_export_to_folder({
+        let to_folder_weak = export_to_folder.as_weak();
+        move || {
+            if let Some(strong) = to_folder_weak.upgrade(){
+                let res = strong.show();
+                res.expect("Failed to show popup");
+                //strong.run().expect("popup run failed");
+            }
+        }
+    });
+
+    export_to_folder.on_do_export({
+        let export_weak = export_to_folder.as_weak();
+        let ui_weak = ui.as_weak();
+        let topics_model_weak = Rc::downgrade(&topics_model);
+        let progress_sender = progress_sender.clone();
+        let error_sender = error_sender.clone();
+        move |options| {
+            // TODO: panic less here
+            let export_to_folder = export_weak.upgrade().expect("failed to upgrade ui");
+            let topics_model = topics_model_weak.upgrade().expect("failed to upgrade topics model");
+            let ui = ui_weak.upgrade().expect("failed to upgrade ui");
+            let progress_sender = progress_sender.clone();
+            let error_sender = error_sender.clone();
+
+            let future = Compat::new(async move {
+                if let Err(e) = do_export_to_folder(&topics_model, &options, &progress_sender).await {
+                    error_sender.send(e).await.expect("Failed to send error");
+                }
+                progress_sender.send(Done).expect("failed to send progress");
+            });
+
+            spawn_local(future).expect("Failed to spawn export task");
+            export_to_folder.hide().expect("Failed to hide dialogue");
+        }
+    });
+
+
+    Ok(PackedDialogues {export_to_folder})
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     init_resources_dir();
     let ui = AppWindow::new()?;
@@ -638,7 +778,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
     let topics_model = init_topics(&ui, &project_dir, &error_sender);
-    let topics_modelrc = ModelRc::new(topics_model);
+    let topics_modelrc = ModelRc::new(topics_model.clone());
 
     init_generator(&ui, &topics_modelrc, &project_dir);
 
@@ -647,6 +787,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     init_generation(&ui, &error_sender, &progress_sender, &cancellation_token);
     init_dialogue_audio(&ui);
+
+    let packed_dialogs = init_export(&ui, &topics_model, &progress_sender, &error_sender)?;
 
     ui.run()?;
 
