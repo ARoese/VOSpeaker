@@ -13,6 +13,7 @@ mod models;
 mod progress;
 mod create_fuz;
 mod static_resources;
+mod dbvo_manifest;
 
 use crate::chatterbox_generator::{ChatterboxGenerator, ChatterboxGeneratorConfig};
 use crate::dialog_generator::{ConfigHashable, DialogGenerationError, DialogGenerator};
