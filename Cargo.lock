@@ -9,6 +9,7 @@ dependencies = [
  "async-compat",
  "async-trait",
  "byteorder",
+ "futures",
  "idx",
  "lazy-regex",
  "log",

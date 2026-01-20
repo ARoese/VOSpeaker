@@ -35,6 +35,7 @@ use std::fs::File;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use futures::{stream, StreamExt};
 use lazy_regex::regex;
 use tokio::sync::watch::Sender;
 use tokio::sync::{mpsc, watch};
@@ -734,6 +735,25 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
     Ok(())
 }
 
+async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path) -> Result<(), UIError> {
+    let changed_err = make_error("Model changed when exporting.");
+    let src = topic_model.audio_path(i).ok_or(changed_err.clone())?;
+    if !src.exists() {
+        return Ok(());
+    }
+
+    let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
+    let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
+    let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
+    let file_name = format_as_file(expanded.0.clone());
+
+    let dest = audio_dir.join(&file_name).with_added_extension("fuz");
+    // TODO: parallelize
+    wav_to_fuz(&src, &OsString::from(expanded.0), &dest).await
+        .map_err(|e| make_error(&format!("Failed to create fuz '{}': {e}", &dest.to_string_lossy())))?;
+    Ok(())
+}
+
 async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
     let export_folder = rfd::FileDialog::new()
         .set_title("Select Export Folder")
@@ -774,31 +794,31 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
             .expect("Topic model was not of custom type");
 
         let num_dialogues = topic_model.row_count();
-        let changed_err = make_error("Model changed when exporting.");
 
-        for i in 0..num_dialogues {
-            let src = topic_model.audio_path(i).ok_or(changed_err.clone())?;
-            if !src.exists() {
-                continue;
-            }
+        let progress = Inflight(Determinate {
+            status: format!("Preparing to export '{}'", topic.topic_name),
+            range: 0..num_dialogues as u64,
+            progress: 0,
+        });
+        progress_sender.send(progress).expect("failed to send progress");
 
-            let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
-            let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
-            let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
-            let file_name = format_as_file(expanded.0.clone());
+        const CONCURRENCY_FACTOR: usize = 32;
+        let mut processing_stream = stream::iter(0..num_dialogues)
+            .map(|i| {
+                process_export_fuz(i, &topic_model, &audio_dir)
+            }).buffer_unordered(CONCURRENCY_FACTOR);
 
-            let dest = audio_dir.join(&file_name).with_added_extension("fuz");
+        let mut i: u64 = 0;
+        while let Some(result) = processing_stream.next().await {
+            result?;
             // report progress
             let progress = Inflight(Determinate {
                 status: format!("Exporting '{}'", topic.topic_name),
                 range: 0..num_dialogues as u64,
-                progress: i as u64,
+                progress: i,
             });
             progress_sender.send(progress).expect("failed to send progress");
-            // TODO: parallelize
-            wav_to_fuz(&src, &OsString::from(expanded.0), &dest).await
-                .map_err(|e| make_error(&format!("Failed to create fuz '{}': {e}", &dest.to_string_lossy())))?;
-            //ProgressState::Inflight(ProgressVal::Determinate {})
+            i+=1;
         }
     }
 
