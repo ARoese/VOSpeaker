@@ -1,15 +1,35 @@
+use std::cell::RefCell;
 use crate::progress::ProgressState::{Done, Inflight};
 use crate::progress::ProgressVal::{Determinate, Indeterminate};
 use crate::{Progress, UIError};
 use std::ops::Range;
+use std::rc::Rc;
 use tokio::sync::mpsc;
 use tokio::sync::watch::Sender as WatchSender;
 use tokio_util::sync::CancellationToken;
 
+#[derive(Clone)]
 pub struct ProgressHandle {
     pub progress_sender: WatchSender<ProgressState>,
     pub error_sender: mpsc::Sender<UIError>,
     pub cancellation: CancellationToken
+}
+
+#[derive(Clone)]
+pub struct ProgressHandleSpawner {
+    pub progress_sender: WatchSender<ProgressState>,
+    pub error_sender: mpsc::Sender<UIError>,
+    pub cancellation: Rc<RefCell<CancellationToken>>
+}
+
+impl ProgressHandleSpawner {
+    pub fn spawn(&self) -> ProgressHandle {
+        ProgressHandle {
+            progress_sender: self.progress_sender.clone(),
+            error_sender: self.error_sender.clone(),
+            cancellation: self.cancellation.borrow().clone()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

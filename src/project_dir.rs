@@ -4,6 +4,7 @@ use std::io::{Error, ErrorKind};
 use std::error::Error as ErrorTrait;
 use std::path::{Path, PathBuf};
 use crate::chatterbox_generator::ChatterboxGeneratorConfig;
+use crate::dbvo_manifest::DBVOManifest;
 use crate::topic_dir::TopicDir;
 use crate::topic_lines::TopicExpansionConfig;
 
@@ -84,6 +85,19 @@ impl ProjectDir {
         let substitutions_path = self.path.join(Self::SUBSTITUTIONS_CONFIG_NAME);
         let substitutions_text = toml::to_string(&substitutions)?;
         Ok(fs::write(&substitutions_path, substitutions_text)?)
+    }
+    
+    const DBVO_MANIFEST_NAME: &str = "last-dbvo-manifest.toml";
+    pub fn load_last_dbvo_manifest(&self) -> Result<DBVOManifest, Box<dyn ErrorTrait>> {
+        let dbvo_manifest_path = self.path.join(Self::DBVO_MANIFEST_NAME);
+        let dbvo_manifest_text = fs::read_to_string(&dbvo_manifest_path)?;
+        Ok(serde_json::from_str::<DBVOManifest>(&dbvo_manifest_text)?)
+    }
+    
+    pub fn save_last_dbvo_manifest(&self, dbvo_manifest: DBVOManifest) -> Result<(), Box<dyn ErrorTrait>> {
+        let dbvo_manifest_path = self.path.join(Self::DBVO_MANIFEST_NAME);
+        let dbvo_manifest_text = serde_json::to_string(&dbvo_manifest)?;
+        Ok(fs::write(&dbvo_manifest_path, dbvo_manifest_text)?)
     }
 }
 

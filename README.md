@@ -76,6 +76,19 @@ dialog has 3 forms:
    4. `BmlFuzEncode.exe "C:\output.fuz" "C:\input.xwm" "C:\input.lip"`
       - The lip file is not necessary if `-nolip` is passed in its place
 
+## DBVO export format:
+```
+<pack_name>/
+├── DragonbornVoiceOver/
+│   └── voice_packs/
+│       └── <pack_id>.json (manifest)
+└── Sound/
+    └── DBVO/
+        └── <pack_id>/
+            ├── line1.fuz
+            └── line2.fuz
+```
+
 ### WINE notes:
    The conversion to .fuz files uses several programs via wine. This requires a valid wine prefix with MVSC and wine-mono installed.
    Setting this up automatically may later be added as a feature. If you're using Linux, you will probably already have a good wine setup anyways.

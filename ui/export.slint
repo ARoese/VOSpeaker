@@ -1,4 +1,4 @@
-import { Palette, ComboBox, CheckBox, Button } from "std-widgets.slint";
+import { Palette, ComboBox, CheckBox, Button, TextEdit, LineEdit } from "std-widgets.slint";
 
 export enum FolderNamingPolicy {
     ExactSpokenDialogue,
@@ -12,6 +12,51 @@ export struct FolderExportOptions {
     group_by_topic: bool,
     topic_suffix: bool,
     naming_policy: FolderNamingPolicy
+}
+
+export struct DBVOExportOptions {
+    voice_pack_name: string,
+    voice_pack_id: string
+}
+
+export component DBVOExportDialogue inherits Window {
+    in-out property <DBVOExportOptions> export_options;
+    callback do_export(DBVOExportOptions);
+
+    title: "Export to DBVO";
+    preferred-height: 190px;
+    preferred-width: 280px;
+    Rectangle {
+        background: Palette.background;
+
+        VerticalLayout {
+            Text {
+                text: "Voice Pack Name:";
+            }
+            vpn-te := LineEdit {
+                text: export_options.voice-pack-name;
+                placeholder-text: "John Skyrim";
+            }
+            Text {
+                text: "Voice Pack ID:";
+            }
+            vpid-te := LineEdit {
+                text: export_options.voice-pack-id;
+                placeholder-text: "dl_JohnSkyrim";
+            }
+            Rectangle {
+                vertical-stretch: 1;
+            }
+            Button {
+                text: "Export to DBVO";
+                clicked => {
+                    export_options.voice-pack-name = vpn-te.text;
+                    export_options.voice-pack-id = vpid-te.text;
+                    do_export(export_options);
+                }
+            }
+        }
+    }
 }
 
 export component FolderExportDialogue inherits Window {

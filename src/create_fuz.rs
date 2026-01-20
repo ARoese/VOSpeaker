@@ -1,11 +1,13 @@
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
+use std::fmt::Display;
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::OsStringExt;
 use std::path::{Path, PathBuf};
+use lazy_regex::regex;
 use tokio::join;
 use tokio::process::Command;
-use crate::static_resources;
+use crate::{make_error, static_resources};
 use crate::static_resources::as_real_file;
 // NOTE: All paths will be unix paths until the instant of a subprocess's execution. A user of this
 // module should NOT have to worry about platform-specific stuff
@@ -99,6 +101,15 @@ pub async fn create_xwm(wav_path: &Path, xwm_destination_path: &Path) -> Result<
     }
 }
 
+/// turn a str into something that's safe to pass on the command line.
+/// removes non-whitespace and non-word characters.
+/// mostly for stripping dialogue_text
+fn cmdline_string(string: &str) -> String {
+    // TODO: slow regex
+    let invalid = regex!(r"\W|\S");
+    invalid.replace_all(string, "").to_string()
+}
+
 /// creates a lip file
 pub async fn create_lip(
     wav_path: &Path,
@@ -106,6 +117,8 @@ pub async fn create_lip(
     lip_destination_path: &Path,
     dialogue_text: &OsStr
 ) -> Result<(), Box<dyn Error>> {
+    // make this safe to pass on the commandline
+    let dialogue_text = OsString::from(cmdline_string(dialogue_text.to_str().unwrap()));
     // convert paths to windows paths
     let bin_path_file_name = as_real_file(static_resources::FACE_FX_BIN).await?;
     let data_path_file_name = as_real_file(static_resources::FONIX_DATA).await?;
@@ -239,28 +252,32 @@ pub async fn wav_to_fuz(wav_path: &Path, dialogue_text: &OsStr, fuz_destination_
         tokio::fs::remove_file(&xwm_path).await?;
     }
 
+    if !fuz_destination_path.exists() {
+        return Err(Box::new(make_error(&format!("Output fuz '{}' does not exist, but command also did not fail.", fuz_destination_path.to_string_lossy()))));
+    }
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::static_resources::{deinit_resources_dir, init_resources_dir};
+    use crate::static_resources::{init_resources_dir};
     use super::*;
 
     #[tokio::test]
     async fn test_make_fuz() {
-        init_resources_dir();
+        let guard = init_resources_dir();
 
         let test_dir = tempfile::tempdir().unwrap();
+        let folder_with_spaces = test_dir.path().join("Folder With Spaces");
+        tokio::fs::create_dir(&folder_with_spaces).await.unwrap();
         let test_wav_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test_assets/sample_voiceline.wav");
-        let fuz_destination = test_dir.path().join("sample_voiceline.fuz");
+        let fuz_destination = folder_with_spaces.join("sample_voiceline.fuz");
 
         //let command = Command::new()
 
         wav_to_fuz(&test_wav_path, &OsString::from("You will no longer talk down to people like that if you're dead!"), &fuz_destination).await.unwrap();
         assert!(fuz_destination.exists());
-
-        deinit_resources_dir();
     }
 }

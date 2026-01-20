@@ -6,11 +6,12 @@ import { ExpansionsEditor } from "expansions.slint";
 import { Mappings, Expansion } from "expansions.slint";
 import { SubstitutionsEditor, SubstitutionsActions } from "substitutions.slint";
 import { UIError, ErrorToastActions, ErrorToasts } from "errors.slint";
-import { FolderExportDialogue } from "export.slint";
-export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions, ErrorToastActions, FolderExportDialogue }
+import { FolderExportDialogue, DBVOExportDialogue } from "export.slint";
+export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions, ErrorToastActions, FolderExportDialogue, DBVOExportDialogue }
 
 export global Dialogs {
     callback show_export_to_folder();
+    callback show_export_to_dbvo();
 }
 
 export component AppWindow inherits Window {
@@ -40,6 +41,9 @@ export component AppWindow inherits Window {
                 }
                 MenuItem {
                     title: "DBVO mod";
+                    activated => {
+                        Dialogs.show_export_to_dbvo();
+                    }
                 }
             }
         }

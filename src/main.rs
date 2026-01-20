@@ -20,7 +20,7 @@ use crate::dialog_generator::{ConfigHashable, DialogGenerationError, DialogGener
 use crate::models::{MassGenerationOptions, TopicModel};
 use crate::progress::ProgressState::{Done, Inflight};
 use crate::progress::ProgressVal::{Determinate, Indeterminate};
-use crate::progress::{ProgressHandle, ProgressState, ProgressVal};
+use crate::progress::{ProgressHandle, ProgressHandleSpawner, ProgressState, ProgressVal};
 use crate::project_dir::ProjectDir;
 use async_compat::Compat;
 use rodio::Sink;
@@ -28,7 +28,8 @@ use slint::{run_event_loop, spawn_local, CloseRequestResponse, JoinHandle, Model
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
+use std::fmt::{Display, Formatter};
 use std::fs;
 use std::fs::File;
 use std::ops::{Deref, DerefMut};
@@ -40,6 +41,8 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
 use log::error;
+use crate::create_fuz::wav_to_fuz;
+use crate::dbvo_manifest::DBVOManifest;
 use crate::static_resources::{deinit_resources_dir, init_resources_dir};
 use crate::topic_dir::TopicDir;
 use crate::topic_lines::{SpokenTopicLine, TopicExpansionConfig};
@@ -79,6 +82,14 @@ fn make_error(message: &str) -> UIError {
         message: message.into()
     }
 }
+
+impl Display for UIError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
+impl Error for UIError {}
 
 // TODO: make this result for error prop
 async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line_idx: i32) -> Result<(), UIError> {
@@ -631,7 +642,8 @@ fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &mpsc
 }
 
 struct PackedDialogues {
-    pub export_to_folder: FolderExportDialogue
+    pub export_to_folder: FolderExportDialogue,
+    pub export_to_dbvo: DBVOExportDialogue
 }
 
 fn format_as_file(name: String) -> String {
@@ -645,7 +657,7 @@ fn format_as_file(name: String) -> String {
         result = result.replaceAll("(_?\\([^)]*\\))+\\s*$", "");
     ```
      */
-    let replace_with_underscore = regex!("[\\\\/:*?\"<>|]");
+    let replace_with_underscore = regex!("[\\\\/:*?\"<>| ]");
     let remove = regex!("(_?\\([^)]*\\))+\\s*$");
     let name = replace_with_underscore.replace_all(&name, "_");
     let name = remove.replace_all(&name, "");
@@ -722,8 +734,100 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
     Ok(())
 }
 
-fn init_export(ui: &AppWindow, topics_model: &Rc<VecModel<TopicListItem>>, progress_sender: &ProgressSender, error_sender: &ErrorSender) -> Result<PackedDialogues, Box<dyn Error>> {
+async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+    let export_folder = rfd::FileDialog::new()
+        .set_title("Select Export Folder")
+        .pick_folder();
+    if export_folder.is_none() { return Ok(()); }
+    let export_folder = export_folder.unwrap();
+
+    let file_count = fs::read_dir(export_folder.clone())
+        .map_err(|_| make_error(&format!("The folder '{}' could not be accessed.", export_folder.to_string_lossy())))?
+        .count();
+
+    let export_folder = if file_count > 0 {
+        export_folder.join(options.voice_pack_name.clone())
+    }else{
+        export_folder
+    };
+
+    let manifest_dir = export_folder.join("DragonbornVoiceOver");
+    let audio_dir = export_folder.join("Sound").join("DBVO").join(options.voice_pack_id.clone());
+
+    tokio::fs::create_dir_all(&audio_dir).await
+        .map_err(|e| make_error(&format!("Failed to create DBVO audio folder '{}': {e}", audio_dir.to_string_lossy())))?;
+    tokio::fs::create_dir_all(&manifest_dir).await
+        .map_err(|e| make_error(&format!("Failed to create DBVO manifest folder '{}': {e}", audio_dir.to_string_lossy())))?;
+
+    let manifest_str = serde_json::to_string_pretty(&DBVOManifest{
+        voice_pack_name: options.voice_pack_name.clone().into(),
+        voice_pack_id: options.voice_pack_id.clone().into(),
+    }).expect("Failed to serialize DBVOManifest, which shouldn't be possible since it's so simple.");
+
+    tokio::fs::write(manifest_dir.join(options.voice_pack_id.clone()).with_extension("json"), manifest_str).await
+        .map_err(|e| make_error(&format!("Failed to write DBVO manifest: {e}")))?;
+
+    for topic in topics_model.iter() {
+        let topic_model = topic.dialog_lines
+            .as_any()
+            .downcast_ref::<TopicModel>()
+            .expect("Topic model was not of custom type");
+
+        let num_dialogues = topic_model.row_count();
+        let changed_err = make_error("Model changed when exporting.");
+
+        for i in 0..num_dialogues {
+            let src = topic_model.audio_path(i).ok_or(changed_err.clone())?;
+            if !src.exists() {
+                continue;
+            }
+
+            let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
+            let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
+            let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
+            let file_name = format_as_file(expanded.0.clone());
+
+            let dest = audio_dir.join(&file_name).with_added_extension("fuz");
+            // report progress
+            let progress = Inflight(Determinate {
+                status: format!("Exporting '{}'", topic.topic_name),
+                range: 0..num_dialogues as u64,
+                progress: i as u64,
+            });
+            progress_sender.send(progress).expect("failed to send progress");
+            // TODO: parallelize
+            wav_to_fuz(&src, &OsString::from(expanded.0), &dest).await
+                .map_err(|e| make_error(&format!("Failed to create fuz '{}': {e}", &dest.to_string_lossy())))?;
+            //ProgressState::Inflight(ProgressVal::Determinate {})
+        }
+    }
+
+    Ok(())
+}
+
+fn init_export(
+    ui: &AppWindow,
+    topics_model: &Rc<VecModel<TopicListItem>>,
+    project_dir: &Rc<ProjectDir>,
+    progress_sender: &ProgressSender,
+    error_sender: &ErrorSender,
+    cancellation_token: &Rc<RefCell<CancellationToken>>
+) -> Result<PackedDialogues, Box<dyn Error>> {
     let export_to_folder = FolderExportDialogue::new()?;
+    let export_to_dbvo = DBVOExportDialogue::new()?;
+    let progress_handle_spawner = ProgressHandleSpawner {
+        progress_sender: progress_sender.clone(),
+        error_sender: error_sender.clone(),
+        cancellation: cancellation_token.clone(),
+    };
+
+    let ui_dbvo_manifest = project_dir.load_last_dbvo_manifest()
+        .map(|m| DBVOExportOptions {
+            voice_pack_id: m.voice_pack_id.to_shared_string(),
+            voice_pack_name: m.voice_pack_name.to_shared_string(),
+        })
+        .unwrap_or_else(|_| DBVOExportOptions::default());
+    export_to_dbvo.set_export_options(ui_dbvo_manifest);
 
     ui.global::<Dialogs>().on_show_export_to_folder({
         let to_folder_weak = export_to_folder.as_weak();
@@ -731,7 +835,16 @@ fn init_export(ui: &AppWindow, topics_model: &Rc<VecModel<TopicListItem>>, progr
             if let Some(strong) = to_folder_weak.upgrade(){
                 let res = strong.show();
                 res.expect("Failed to show popup");
-                //strong.run().expect("popup run failed");
+            }
+        }
+    });
+
+    ui.global::<Dialogs>().on_show_export_to_dbvo({
+        let to_dbvo_weak = export_to_dbvo.as_weak();
+        move || {
+            if let Some(strong) = to_dbvo_weak.upgrade(){
+                let res = strong.show();
+                res.expect("Failed to show popup");
             }
         }
     });
@@ -740,21 +853,21 @@ fn init_export(ui: &AppWindow, topics_model: &Rc<VecModel<TopicListItem>>, progr
         let export_weak = export_to_folder.as_weak();
         let ui_weak = ui.as_weak();
         let topics_model_weak = Rc::downgrade(&topics_model);
-        let progress_sender = progress_sender.clone();
-        let error_sender = error_sender.clone();
+        let progress_handle_spawner = progress_handle_spawner.clone();
         move |options| {
             // TODO: panic less here
             let export_to_folder = export_weak.upgrade().expect("failed to upgrade ui");
             let topics_model = topics_model_weak.upgrade().expect("failed to upgrade topics model");
             let ui = ui_weak.upgrade().expect("failed to upgrade ui");
-            let progress_sender = progress_sender.clone();
-            let error_sender = error_sender.clone();
+            let progress_handle = progress_handle_spawner.spawn();
 
             let future = Compat::new(async move {
-                if let Err(e) = do_export_to_folder(&topics_model, &options, &progress_sender).await {
-                    error_sender.send(e).await.expect("Failed to send error");
+                let result = do_export_to_folder(&topics_model, &options, &progress_handle.progress_sender)
+                    .with_cancellation_token(&progress_handle.cancellation).await;
+                if let Some(Err(e)) = result {
+                    progress_handle.error_sender.send(e).await.expect("Failed to send error");
                 }
-                progress_sender.send(Done).expect("failed to send progress");
+                progress_handle.progress_sender.send(Done).expect("failed to send progress");
             });
 
             spawn_local(future).expect("Failed to spawn export task");
@@ -762,12 +875,44 @@ fn init_export(ui: &AppWindow, topics_model: &Rc<VecModel<TopicListItem>>, progr
         }
     });
 
+    export_to_dbvo.on_do_export({
+        let export_weak = export_to_dbvo.as_weak();
+        let ui_weak = ui.as_weak();
+        let topics_model_weak = Rc::downgrade(&topics_model);
+        let progress_handle_spawner = progress_handle_spawner.clone();
+        let project_dir = project_dir.clone();
+        move |options| {
+            // TODO: panic less here
+            let export_to_dbvo = export_weak.upgrade().expect("failed to upgrade ui");
+            let topics_model = topics_model_weak.upgrade().expect("failed to upgrade topics model");
+            let ui = ui_weak.upgrade().expect("failed to upgrade ui");
+            let progress_handle = progress_handle_spawner.spawn();
+            project_dir.save_last_dbvo_manifest(DBVOManifest{
+                voice_pack_name: options.voice_pack_name.to_string(),
+                voice_pack_id: options.voice_pack_id.to_string()
+            }).ok(); // if the write fails, it's not really a big deal
 
-    Ok(PackedDialogues {export_to_folder})
+
+            let future = Compat::new(async move {
+                let result = do_export_to_dbvo(&topics_model, &options, &progress_handle.progress_sender)
+                    .with_cancellation_token(&progress_handle.cancellation).await;
+                if let Some(Err(e)) = result {
+                    progress_handle.error_sender.send(e).await.expect("Failed to send error");
+                }
+                progress_handle.progress_sender.send(Done).expect("failed to send progress");
+            });
+
+            spawn_local(future).expect("Failed to spawn export task");
+            export_to_dbvo.hide().expect("Failed to hide dialogue");
+        }
+    });
+
+
+    Ok(PackedDialogues {export_to_folder, export_to_dbvo})
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    init_resources_dir();
+    let resources_guard = init_resources_dir();
     let ui = AppWindow::new()?;
 
     let project_dir = Rc::from(ProjectDir::new(
@@ -789,7 +934,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     init_generation(&ui, &error_sender, &progress_sender, &cancellation_token);
     init_dialogue_audio(&ui);
 
-    let packed_dialogs = init_export(&ui, &topics_model, &progress_sender, &error_sender)?;
+    let packed_dialogs = init_export(&ui, &topics_model, &project_dir, &progress_sender, &error_sender, &cancellation_token)?;
 
     ui.run()?;
 
@@ -804,6 +949,5 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     project_dir.save_substitutions(get_substitutions(&ui))?;
 
-    deinit_resources_dir();
     Ok(())
 }
