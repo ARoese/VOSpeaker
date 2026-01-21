@@ -22,10 +22,11 @@ async-compat = "0.2.5"
 rfd = "0.16.0"
 tokio-util = "0.7.17"
 futures = "0.3.31"
-idx = "0.2.0"
 static-files = "0.3.1"
 tempfile = "3.21.0"
 log = "0.4.29"
+clap = { version = "4.5.54", features = ["derive"] }
+dirs = "6.0.0"
 
 [build-dependencies]
 slint-build = "1.14.1"

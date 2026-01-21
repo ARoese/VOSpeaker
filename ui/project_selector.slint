@@ -1,0 +1,43 @@
+import { Palette, Button, StandardListView } from "std-widgets.slint";
+
+export component ProjectSelector inherits Window {
+    title: "VOSpeaker - Select or Create Project";
+    preferred-height: 450px;
+    preferred-width: 400px;
+
+    in-out property <[StandardListViewItem]> previous_paths;
+    property <int> previous_selected_index: -1;
+    callback open_project();
+    callback open_project_index(int);
+    callback new_project();
+
+    Rectangle {
+        vertical-stretch: 1;
+        horizontal-stretch: 1;
+        background: Palette.background;
+        VerticalLayout {
+            spacing: 4px;
+
+            VerticalLayout {
+                view := StandardListView {
+                    model: previous_paths;
+                    vertical-stretch: 1;
+                }
+                Button {
+                    text: view.current-item == -1 ? "Open Project" : "Open Selected Project";
+                    clicked => {
+                        if(view.current-item == -1){
+                            open_project()
+                        }else{
+                            open_project_index(view.current-item)
+                        }
+                    }
+                }
+            }
+            Button {
+                text: "Create Project";
+                clicked => {new_project()}
+            }
+        }
+    }
+}
