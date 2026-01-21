@@ -1,0 +1,36 @@
+import { LineEdit, CheckBox } from "std-widgets.slint";
+export struct DialogueFilterOptions {
+    search_term: string,
+    search_in_spoken: bool,
+    search_in_expanded: bool
+}
+
+export component EditDialogueFilter inherits HorizontalLayout {
+    in-out property <DialogueFilterOptions> options;
+    // TODO: handle this by adding a mapping function to the topic display which uses a global callback
+    // TODO: to generate a filter model. This will regenerate when the filter changes, so the filtering
+    // TODO: changes live
+    // TODO: scratch this ^
+
+
+    // TODO: Instead, so we can maintain a 1:1 mapping for play_audio and generate_audio, each entry in the ui
+    // TODO: should be in an if statement. Then, there is a global function which determines if an individual
+    // TODO: TopicDialogueLine should be displayed based on the filter
+    CheckBox {
+        text: "Search in Spoken";
+        changed checked => {
+            options.search-in-spoken = self.checked;
+        }
+    }
+    CheckBox {
+        text: "Search in Expanded";
+        changed checked => {
+            options.search-in-expanded = self.checked;
+        }
+    }
+    LineEdit {
+        changed text => {
+            options.search-term = self.text;
+        }
+    }
+}

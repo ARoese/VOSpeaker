@@ -165,6 +165,8 @@ pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
 impl SubstitutedTopicLine {
 
     fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
+        // TODO: this fails to do replacements when a word has an attached punctuation. For example,
+        // TODO: jarl -> yarl fails on "I am not the jarl..." because of the ellipses. Same with commas
         let lower_substitutions = substitutions.iter().map(|(k,v)| (k.to_lowercase(), v)).collect::<HashMap<_,_>>();
         let mut exploded = original.split(' ').map(String::from).collect::<Vec<String>>();
         for word in exploded.iter_mut() {

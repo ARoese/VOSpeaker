@@ -1,5 +1,7 @@
 import { Button, ListView, Palette, Spinner, ScrollView } from "std-widgets.slint";
 import { GenerationActions } from "generator.slint";
+import { DialogueFilterOptions } from "filter.slint";
+
 export struct TopicDialogLine {
     substituted_line: string,
     clean_line: string,
@@ -15,9 +17,14 @@ export global Audio {
     callback play_dialog(int, int);
 }
 
+export global FilterActions {
+    pure callback filter_accepts(DialogueFilterOptions, TopicDialogLine) -> bool;
+}
+
 component TopicListItemView inherits VerticalLayout {
     in-out property <TopicListItem> item;
     in-out property <bool> expanded: false;
+    in-out property <DialogueFilterOptions> filter_options;
     callback expand_clicked();
     callback generate_audio(int);
     callback play_audio(int);
@@ -91,44 +98,46 @@ component TopicListItemView inherits VerticalLayout {
         min-height: 0px;
         visible: expanded;
         vertical-stretch: expanded ? 1.0 : 0.0;
-        for dLine[i] in item.dialog_lines: HorizontalLayout {
-            padding: 4px;
-            if dLine.can_play: Button {
-                colorize-icon: true;
-                icon: @image-url("assets/play.svg");
-                text: "play";
-                clicked => {
-                    root.play_audio(i);
+        for dLine[i] in item.dialog_lines: VerticalLayout{
+            if FilterActions.filter_accepts(filter_options, dLine): HorizontalLayout {
+                padding: 4px;
+                if dLine.can_play: Button {
+                    colorize-icon: true;
+                    icon: @image-url("assets/play.svg");
+                    text: "play";
+                    clicked => {
+                        root.play_audio(i);
+                    }
                 }
-            }
 
-            if !dLine.can_play: Button {
-                colorize-icon: true;
-                icon: @image-url("assets/audio-lines.svg");
-                text: "generate";
-                clicked => {generate_audio(i)}
-            }
-
-            VerticalLayout {
-                horizontal-stretch: 1;
-                Text{
-                    color: Palette.foreground;
-                    overflow: elide;
-                    text: dLine.clean_line;
+                if !dLine.can_play: Button {
+                    colorize-icon: true;
+                    icon: @image-url("assets/audio-lines.svg");
+                    text: "generate";
+                    clicked => {generate_audio(i)}
                 }
-                Text{
-                    color: Palette.foreground.transparentize(0.6);
-                    overflow: elide;
-                    text: dLine.substituted-line;
-                }
-            }
 
-            if dLine.can_play: Button {
-                // to keep it out of the scrollbar
-                colorize-icon: true;
-                icon: @image-url("assets/redo.svg");
-                text: "regenerate";
-                clicked => {generate_audio(i)}
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Text{
+                        color: Palette.foreground;
+                        overflow: elide;
+                        text: dLine.clean_line;
+                    }
+                    Text{
+                        color: Palette.foreground.transparentize(0.6);
+                        overflow: elide;
+                        text: dLine.substituted-line;
+                    }
+                }
+
+                if dLine.can_play: Button {
+                    // to keep it out of the scrollbar
+                    colorize-icon: true;
+                    icon: @image-url("assets/redo.svg");
+                    text: "regenerate";
+                    clicked => {generate_audio(i)}
+                }
             }
         }
     }
@@ -137,6 +146,7 @@ component TopicListItemView inherits VerticalLayout {
 export component TopicList inherits VerticalLayout {
     callback add_topic_from_path();
     callback remove_topic(int);
+    in-out property <DialogueFilterOptions> filter_options;
     in-out property <[TopicListItem]> model: [
         {
             topic_name: "topic 1",
@@ -171,6 +181,7 @@ export component TopicList inherits VerticalLayout {
     if expanded_index >= 0 && expanded_index < model.length: TopicListItemView {
         item: model[expanded_index];
         expanded: true;
+        filter_options: filter_options;
         expand_clicked => {
             expanded_index = -1
         }
