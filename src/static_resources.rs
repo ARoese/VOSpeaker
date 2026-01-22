@@ -5,11 +5,13 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, RwLock};
 use static_files::Resource;
 use tempfile::TempDir;
+use tokio::sync::{Mutex};
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 pub static RESOURCES: LazyLock<HashMap<&str, Resource>> = LazyLock::new(|| generate());
 static RESOURCES_DIR: RwLock<Option<TempDir>> = RwLock::new(None);
+static RESOURCES_DIR_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 pub static FONIX_DATA: &str = "FonixData.cdf";
 pub static FACE_FX_BIN: &str = "FaceFXWrapper.exe";
@@ -51,6 +53,7 @@ pub fn deinit_resources_dir() {
 /// get a valid path to the resource file. The actual location is not guaranteed,
 /// and the location might not be valid until this method is called
 pub async fn as_real_file(resource: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let _lock = RESOURCES_DIR_LOCK.lock().await;
     // if the resources dir was not initialized yet, then do it here.
     // This will likely leave the directory dangling, but will prevent errors
     if RESOURCES_DIR.read().expect("Could not lock").is_none() {
