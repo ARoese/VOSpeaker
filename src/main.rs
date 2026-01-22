@@ -806,6 +806,12 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         });
         progress_sender.send(progress).expect("failed to send progress");
 
+
+        //TODO: This fails if two voicelines which map to the same dialogue are exported
+        //TODO: At the same time. They will be using each other's lip and wmx files, which can
+        //TODO: be deleted out from under each other at any time. This kind of spawning
+        //TODO: should be prevented using a hashset or something, so that only one
+        //TODO: export will be done per md5
         const CONCURRENCY_FACTOR: usize = 32;
         let mut processing_stream = stream::iter(0..num_dialogues)
             .map(|i| {
