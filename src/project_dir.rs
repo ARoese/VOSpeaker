@@ -87,7 +87,7 @@ impl ProjectDir {
         Ok(fs::write(&substitutions_path, substitutions_text)?)
     }
     
-    const DBVO_MANIFEST_NAME: &str = "last-dbvo-manifest.toml";
+    const DBVO_MANIFEST_NAME: &str = "last-dbvo-manifest.json";
     pub fn load_last_dbvo_manifest(&self) -> Result<DBVOManifest, Box<dyn ErrorTrait>> {
         let dbvo_manifest_path = self.path.join(Self::DBVO_MANIFEST_NAME);
         let dbvo_manifest_text = fs::read_to_string(&dbvo_manifest_path)?;

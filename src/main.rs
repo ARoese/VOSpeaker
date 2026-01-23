@@ -48,6 +48,7 @@ use serde::{Deserialize, Serialize};
 use toml::toml;
 use crate::create_fuz::wav_to_fuz;
 use crate::dbvo_manifest::DBVOManifest;
+use crate::hashes::VOHash;
 use crate::static_resources::{deinit_resources_dir, init_resources_dir};
 use crate::topic_dir::TopicDir;
 use crate::topic_lines::{SpokenTopicLine, TopicExpansionConfig};
@@ -739,7 +740,24 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
     Ok(())
 }
 
-async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path) -> Result<(), UIError> {
+/// true if file a is newer than file b
+fn is_newer_than(a: &Path, b: &Path) -> bool {
+    let a_metadata = fs::metadata(a);
+    let b_metadata = fs::metadata(b);
+    if let Ok(a_metadata) = a_metadata && let Ok(b_metadata) = b_metadata {
+        if let Ok(a_mod_time) = a_metadata.modified() && let Ok(b_mod_time) = b_metadata.modified() {
+            a_mod_time > b_mod_time
+        }else{
+           false
+        }
+    }else{
+        false
+    }
+}
+
+async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path, processing_set: Rc<RefCell<HashSet<VOHash>>>) -> Result<(), UIError> {
+    // mut access to the processing_set refcell is safe here if the mut ref is never held across an async boundary
+    // and futures are not advanced on separate threads (this scenario should be impossible to compile anyways because there is no mutex)
     let changed_err = make_error("Model changed when exporting.");
     let src = topic_model.audio_path(i).ok_or(changed_err.clone())?;
     if !src.exists() {
@@ -748,20 +766,47 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
 
     let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
     let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
+    if processing_set.borrow().contains(&hash) {
+        // someone else is already processing this. Let them handle it.
+        return Ok(());
+    }
+    // mark this hash as being processed
+    // TODO: make this cleaner with a dropguard or something
+    processing_set.borrow_mut().insert(hash);
     let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
     let file_name = format_as_file(expanded.0.clone());
+    let cache_dest = src.with_extension("fuz");
+    let final_dest = audio_dir.join(&file_name).with_added_extension("fuz");
+    // if the fuz file is newer than the wav file, we don't need to re-process it
+    if cache_dest.exists() && is_newer_than(&cache_dest, &src) {
+        // unmark this hash as being processed. From this point on,
+        // the fuz file's existence will prevent reprocessing
+        tokio::fs::copy(&cache_dest, &final_dest).await
+            .map_err(|e| make_error(&format!("Failed to move created fuz '{}': {e}", &final_dest.to_string_lossy())))?;
+        processing_set.borrow_mut().remove(&hash);
+        return Ok(());
+    }
 
-    let dest = audio_dir.join(&file_name).with_added_extension("fuz");
-    // TODO: parallelize
-    wav_to_fuz(&src, &OsString::from(expanded.0), &dest).await
-        .map_err(|e| make_error(&format!("Failed to create fuz '{}': {e}", &dest.to_string_lossy())))?;
+    wav_to_fuz(&src, &OsString::from(expanded.0), &cache_dest).await
+        .map_err(|e| make_error(&format!("Failed to create fuz '{}': {e}", &final_dest.to_string_lossy())))?;
+
+    tokio::fs::copy(&cache_dest, &final_dest).await
+        .map_err(|e| make_error(&format!("Failed to move created fuz '{}': {e}", &final_dest.to_string_lossy())))?;
+
+    // unmark this hash as being processed. From this point on,
+    // the fuz file's existence will prevent reprocessing
+    processing_set.borrow_mut().remove(&hash);
     Ok(())
 }
 
 async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+    if options.voice_pack_name.is_empty() || options.voice_pack_id.is_empty() {
+        return Err(make_error("Exporting with an empty voice pack name or voice pack id makes no sense. These values are important for loading the DBVO!"));
+    }
     let export_folder = rfd::FileDialog::new()
         .set_title("Select Export Folder")
         .pick_folder();
+
     if export_folder.is_none() { return Ok(()); }
     let export_folder = export_folder.unwrap();
 
@@ -770,7 +815,13 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         .count();
 
     let export_folder = if file_count > 0 {
-        export_folder.join(options.voice_pack_name.clone())
+        // if the selected folder is equal to the voice pack name, the user probably doesn't want to
+        // make a subfolder in it
+        if export_folder.file_name().unwrap().to_string_lossy() != options.voice_pack_name.to_string() {
+            export_folder.join(options.voice_pack_name.clone())
+        }else{
+            export_folder
+        }
     }else{
         export_folder
     };
@@ -807,15 +858,11 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         progress_sender.send(progress).expect("failed to send progress");
 
 
-        //TODO: This fails if two voicelines which map to the same dialogue are exported
-        //TODO: At the same time. They will be using each other's lip and wmx files, which can
-        //TODO: be deleted out from under each other at any time. This kind of spawning
-        //TODO: should be prevented using a hashset or something, so that only one
-        //TODO: export will be done per md5
         const CONCURRENCY_FACTOR: usize = 32;
+        let processing_set = Rc::new(RefCell::new(HashSet::<VOHash>::with_capacity(CONCURRENCY_FACTOR)));
         let mut processing_stream = stream::iter(0..num_dialogues)
             .map(|i| {
-                process_export_fuz(i, &topic_model, &audio_dir)
+                process_export_fuz(i, &topic_model, &audio_dir, processing_set.clone())
             }).buffer_unordered(CONCURRENCY_FACTOR);
 
         let mut i: u64 = 0;
