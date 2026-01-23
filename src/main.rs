@@ -549,8 +549,7 @@ fn init_generator(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, project
             endpoint: "localhost:9005".into(), // TODO: leave this default when done testing
             exaggeration: 0.5,
             temperature: 0.5,
-            voice_path: Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("test_assets/female-khajiit.wav"), // TODO: leave this as default when done testing
+            voice_path: Default::default()
         });
 
     if let Some(config) = chatterbox_config_disk.try_into().ok() {
