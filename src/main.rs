@@ -825,7 +825,7 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         export_folder
     };
 
-    let manifest_dir = export_folder.join("DragonbornVoiceOver");
+    let manifest_dir = export_folder.join("DragonbornVoiceOver").join("voice_packs");
     let audio_dir = export_folder.join("Sound").join("DBVO").join(options.voice_pack_id.clone());
 
     tokio::fs::create_dir_all(&audio_dir).await
