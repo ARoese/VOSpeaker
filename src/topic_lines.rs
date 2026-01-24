@@ -5,6 +5,7 @@ use lazy_regex::{regex, Regex};
 use serde::{Deserialize, Serialize};
 use crate::hashes::VOHash;
 use crate::topic_lines::ExplodedMember::{RawText, Substitute};
+use crate::topic_lines::SentenceFragment::{DecoratedWord, Word};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TopicExpansionConfig {
@@ -147,6 +148,8 @@ impl RawTopicLine {
     }
 }
 
+// TODO: This has problems if there is a period. Ex. "Some dialogue (something that should be removed)."
+// TODO: This has problems with multiple sets of parens Ex. "I'll do it. (Cast turn Undead) (15 Gold)"
 fn without_leading_trailing_parens(line: &str) -> &str {
     let start_parens_regex = regex!(r"^(\(.*?\)).*");
     let end_parens_regex = regex!(r".*(\(.*?\))$");
@@ -160,23 +163,79 @@ fn without_leading_trailing_parens(line: &str) -> &str {
     without_parens
 }
 
+enum SentenceFragment {
+    Word(String),
+    DecoratedWord{
+        prefix: String,
+        word: String,
+        suffix: String
+    }
+}
+
+struct Sentence {
+    words: Vec<SentenceFragment>,
+}
+
+impl Sentence {
+    pub fn from_string(input: &str) -> Sentence {
+        let decorative_punctuation = vec!['.', ',', ';', ':', '"', '\'', '`', '*', '!', '?', '/', '\\', '|', '_'];
+        let words = input.split(" ")
+            .map(|w| {
+                if !w.chars().any(|c| decorative_punctuation.contains(&c)) {
+                    Word(w.to_string())
+                }else{
+                    let chars = w.chars().collect::<Vec<_>>();
+
+                    let prefix_end = chars.iter().position(|c| !decorative_punctuation.contains(&c));
+                    let mut prefix = String::new();
+                    let without_prefix = if let Some(prefix_end) = prefix_end {
+                        prefix = chars[..prefix_end].iter().collect();
+                        &chars[prefix_end..]
+                    }else{
+                        &chars[..]
+                    };
+                    let mut suffix = String::new();
+                    let suffix_start = without_prefix.iter().rposition(|c| !decorative_punctuation.contains(&c));
+                    let without_suffix = if let Some(suffix_start) = suffix_start && suffix_start != without_prefix.len()-1 {
+                        suffix = chars[suffix_start+1..].iter().collect();
+                        &without_prefix[..suffix_start+1]
+                    }else{
+                        &without_prefix[..]
+                    };
+
+
+                    let word = without_suffix.iter().collect::<String>();
+                    DecoratedWord{prefix, word, suffix}
+                }
+            }).collect();
+
+        Sentence{words}
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
 impl SubstitutedTopicLine {
 
     fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
-        // TODO: this fails to do replacements when a word has an attached punctuation. For example,
-        // TODO: jarl -> yarl fails on "I am not the jarl..." because of the ellipses. Same with commas
         let lower_substitutions = substitutions.iter().map(|(k,v)| (k.to_lowercase(), v)).collect::<HashMap<_,_>>();
-        let mut exploded = original.split(' ').map(String::from).collect::<Vec<String>>();
-        for word in exploded.iter_mut() {
-            let lowercase_ver = word.to_lowercase();
-            if lower_substitutions.contains_key(lowercase_ver.as_str()) {
-                *word = lower_substitutions[&lowercase_ver].clone()
-            }
-        }
-        
-        exploded.join(" ")
+        let sentence = Sentence::from_string(original);
+
+        sentence.words
+            .into_iter()
+            .map(|frag| {
+                match frag {
+                    Word(w) => {
+                        lower_substitutions.get(&w.to_lowercase()).cloned().cloned().unwrap_or(w)
+                    }
+                    DecoratedWord { prefix, word, suffix } => {
+                        let new_word = lower_substitutions.get(&word.to_lowercase()).cloned().cloned().unwrap_or(word);
+                        format!("{}{}{}", prefix, new_word, suffix)
+                    }
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
     pub fn spoken(&self, substitutions: &HashMap<String, String>) -> SpokenTopicLine {
         let trimmed = self.0.trim()
@@ -184,7 +243,14 @@ impl SubstitutedTopicLine {
             .collect::<Vec<&str>>()
             .join(" ");
 
-        let without_parens = without_leading_trailing_parens(&trimmed).to_string().trim().to_string();
+        // continuously trim parenthesized portions out of the dialogue until doing so results in no change.
+        // TODO: This is very slow. Prefer a parsing approach.
+        let mut without_parens = without_leading_trailing_parens(&trimmed).to_string().trim().to_string();
+        let mut without_parens_next = without_leading_trailing_parens(&without_parens).to_string().trim().to_string();
+        while without_parens_next != without_parens {
+            without_parens = without_parens_next.to_string();
+            without_parens_next = without_leading_trailing_parens(&without_parens).to_string();
+        }
         
         let substituted = Self::perform_substitutions(&without_parens, substitutions.clone());
         SpokenTopicLine(
