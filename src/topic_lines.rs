@@ -36,7 +36,7 @@ pub enum ExplodedMember{
 }
 
 pub fn explode_raw_line(line: &str) -> ExplodedRawLine {
-    let globals_regex = regex!(r"<(?:global|alias)=(.*?)>"i);
+    let globals_regex = regex!(r"<\s*(?:global|alias)?\s*(?:\.\s*(?<suffix>.+?))?\s*=\s*(?<basename>.+?\s*)>|<(?<basename2>\w+)>"i);
 
     let mut elements: Vec<ExplodedMember> = Vec::new();
     let mut source = line;
@@ -45,14 +45,28 @@ pub fn explode_raw_line(line: &str) -> ExplodedRawLine {
     // consume the shifted portion of source
     // repeat until there are no more matches
     while let Some(capture) = globals_regex.captures(&source) {
-        let name = capture[1].to_string();
+        let basename = {
+            let basename = capture.name("basename");
+            let basename2 = capture.name("basename2");
+            if let Some(basename2) = basename2 {
+                basename2.as_str()
+            }else{
+                basename.expect("If basename2 is None, then basename MUST be some.").as_str()
+            }
+        };
+
+        let derived_name = if let Some(suffix) = capture.name("suffix") {
+            format!("{}.{}", basename, suffix.as_str())
+        }else{
+            basename.to_string()
+        };
         let capture_range = &capture.get_match().range();
         if capture_range.start != 0 {
             // add the preceding raw text
             elements.push(RawText(source[..capture_range.start].to_string()));
         }
         // add the matched global
-        elements.push(Substitute(name));
+        elements.push(Substitute(derived_name));
         // consume the portion parsed
         source = &source[capture_range.end..];
         // source.replace_range(..capture_range.end, "");
