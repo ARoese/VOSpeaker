@@ -133,12 +133,13 @@ impl ExplodedRawLine {
         // RECURSIVE CASE: The replace_all_of call replaces the first global with each of its
         // possible substitutions. This means that the recursive calls have one less global
         // to replace. This means all calls will eventually return
-        substitutions_vec
+        let mut expanded: Vec<String> = substitutions_vec
             .iter()
             .flat_map(|substitution|
                 self.replace_all_of(first_name, substitution).permute(&substitutions)
-            ).collect::<HashSet<String>>() // remove duplicates
-            .into_iter().collect()
+            ).into_iter().collect();
+        expanded.dedup(); // remove duplicate lines in a stable way
+        expanded
     }
 
     /// replace all Substitute(target) with RawLine(replacement)
