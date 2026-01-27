@@ -108,37 +108,46 @@ impl ExplodedRawLine {
     }
 
     pub fn permute(&self, substitutions: &HashMap<String, Vec<String>>) -> Vec<String> {
-        // permute the first global
-        let mut replaced = self.replace_first(substitutions);
-
         // permute all globals after that until we no longer have any left
-        while replaced.iter().any(|e| e.has_substitutions()) {
-            replaced = replaced.iter().flat_map(|e| e.replace_first(substitutions)).collect();
-        }
+        let first_name = self.0.iter().find_map(|part|
+            match part {
+                Substitute(name) => Some(name),
+                _ => None
+            }
+        );
 
-        // implode all permutations into strings
-        replaced.iter().map(ExplodedRawLine::implode).collect()
+        // for any recursive tree, ALL leaves will take the same base case
+        let Some(first_name) = first_name else {
+            // BASE CASE: if there is nothing to substitute,
+            // implode the line to a string, and return it
+            return vec![self.implode()]
+        };
+
+        let Some(substitutions_vec) = substitutions.get(first_name) else {
+            // BASE CASE: if we encounter a substitution with no
+            // replacements, then return nothing. This will eventually make the
+            // whole recursive call return empty vec because all leaves will return here
+            return vec![];
+        };
+
+        // RECURSIVE CASE: The replace_all_of call replaces the first global with each of its
+        // possible substitutions. This means that the recursive calls have one less global
+        // to replace. This means all calls will eventually return
+        substitutions_vec
+            .iter()
+            .flat_map(|substitution|
+                self.replace_all_of(first_name, substitution).permute(&substitutions)
+            ).collect::<HashSet<String>>() // remove duplicates
+            .into_iter().collect()
     }
 
-    fn replace_first(&self, substitutions: &HashMap<String, Vec<String>>) -> Vec<ExplodedRawLine> {
-        if !self.has_substitutions(){
-            return vec![self.clone()];
+    /// replace all Substitute(target) with RawLine(replacement)
+    fn replace_all_of(&self, target: &String, replacement: &String) -> ExplodedRawLine {
+        let mut clone = self.clone();
+        for elem in clone.0.iter_mut().filter(|e| matches!(e, Substitute(name) if name == target)) {
+            *elem = RawText(replacement.clone());
         }
-
-        let mut res = Vec::<ExplodedRawLine>::new();
-        for (i,e) in self.0.iter().enumerate() {
-            if let Substitute(name) = e {
-                if let Some(rep_list) = substitutions.get(name) {
-                    for rep in rep_list.iter() {
-                        let mut copy = self.clone();
-                        copy.0[i] = RawText(rep.clone());
-                        res.push(copy);
-                    }
-                }
-            }
-        }
-
-        res
+        clone
     }
 }
 
@@ -232,6 +241,7 @@ pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
 impl SubstitutedTopicLine {
 
     fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
+        // TODO: Text with quotation marks will duplicate the last letter before the quotation mark. Fix this.
         let lower_substitutions = substitutions.iter().map(|(k,v)| (k.to_lowercase(), v)).collect::<HashMap<_,_>>();
         let sentence = Sentence::from_string(original);
 
