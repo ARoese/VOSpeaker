@@ -19,7 +19,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
@@ -176,6 +176,34 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
     Ok(())
 }
 
+/// Creates a complete DBVO dir, respecting the options given, and returns the directory in which fuz files should be placed.
+/// The audio directory will have already been created
+async fn make_dbvo_dirs(export_folder: &Path, options: &DBVOExportOptions, topic_name: &str) -> Result<PathBuf, UIError> {
+    let manifest_str = serde_json::to_string_pretty(&DBVOManifest{
+        voice_pack_name: options.voice_pack_name.clone().into(),
+        voice_pack_id: options.voice_pack_id.clone().into(),
+    }).expect("Failed to serialize DBVOManifest, which shouldn't be possible since it's so simple.");
+
+    let export_folder = if(options.separate_topics) {
+        export_folder.join(format!("{} - {topic_name}", options.voice_pack_name))
+    }else{
+        export_folder.into()
+    };
+
+    let manifest_dir = export_folder.join("DragonbornVoiceOver").join("voice_packs");
+    let audio_dir = export_folder.join("Sound").join("DBVO").join(options.voice_pack_id.clone());
+
+    tokio::fs::create_dir_all(&audio_dir).await
+        .map_err(|e| make_error(&format!("Failed to create DBVO audio folder '{}': {e}", audio_dir.to_string_lossy())))?;
+    tokio::fs::create_dir_all(&manifest_dir).await
+        .map_err(|e| make_error(&format!("Failed to create DBVO manifest folder '{}': {e}", audio_dir.to_string_lossy())))?;
+
+    tokio::fs::write(manifest_dir.join(options.voice_pack_id.clone()).with_extension("json"), manifest_str).await
+        .map_err(|e| make_error(&format!("Failed to write DBVO manifest: {e}")))?;
+    
+    Ok(audio_dir)
+}
+
 async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
     if options.voice_pack_name.is_empty() || options.voice_pack_id.is_empty() {
         return Err(make_error("Exporting with an empty voice pack name or voice pack id makes no sense. These values are important for loading the DBVO!"));
@@ -203,22 +231,6 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         export_folder
     };
 
-    let manifest_dir = export_folder.join("DragonbornVoiceOver").join("voice_packs");
-    let audio_dir = export_folder.join("Sound").join("DBVO").join(options.voice_pack_id.clone());
-
-    tokio::fs::create_dir_all(&audio_dir).await
-        .map_err(|e| make_error(&format!("Failed to create DBVO audio folder '{}': {e}", audio_dir.to_string_lossy())))?;
-    tokio::fs::create_dir_all(&manifest_dir).await
-        .map_err(|e| make_error(&format!("Failed to create DBVO manifest folder '{}': {e}", audio_dir.to_string_lossy())))?;
-
-    let manifest_str = serde_json::to_string_pretty(&DBVOManifest{
-        voice_pack_name: options.voice_pack_name.clone().into(),
-        voice_pack_id: options.voice_pack_id.clone().into(),
-    }).expect("Failed to serialize DBVOManifest, which shouldn't be possible since it's so simple.");
-
-    tokio::fs::write(manifest_dir.join(options.voice_pack_id.clone()).with_extension("json"), manifest_str).await
-        .map_err(|e| make_error(&format!("Failed to write DBVO manifest: {e}")))?;
-
     for topic in topics_model.iter() {
         let topic_model = topic.dialog_lines
             .as_any()
@@ -234,12 +246,13 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         });
         progress_sender.send(progress).expect("failed to send progress");
 
+        let fuz_dir = make_dbvo_dirs(&export_folder, &options, &topic.topic_name).await?;
 
         const CONCURRENCY_FACTOR: usize = 32;
         let processing_set = Rc::new(RefCell::new(HashSet::<VOHash>::with_capacity(CONCURRENCY_FACTOR)));
         let mut processing_stream = stream::iter(0..num_dialogues)
             .map(|i| {
-                process_export_fuz(i, &topic_model, &audio_dir, processing_set.clone())
+                process_export_fuz(i, &topic_model, &fuz_dir, processing_set.clone())
             }).buffer_unordered(CONCURRENCY_FACTOR);
 
         let mut i: u64 = 0;
@@ -279,6 +292,7 @@ pub fn init_export(
         .map(|m| DBVOExportOptions {
             voice_pack_id: m.voice_pack_id.to_shared_string(),
             voice_pack_name: m.voice_pack_name.to_shared_string(),
+            separate_topics: false
         })
         .unwrap_or_else(|_| DBVOExportOptions::default());
     export_to_dbvo.set_export_options(ui_dbvo_manifest);

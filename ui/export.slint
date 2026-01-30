@@ -16,7 +16,8 @@ export struct FolderExportOptions {
 
 export struct DBVOExportOptions {
     voice_pack_name: string,
-    voice_pack_id: string
+    voice_pack_id: string,
+    separate_topics: bool
 }
 
 export component DBVOExportDialogue inherits Window {
@@ -44,6 +45,10 @@ export component DBVOExportDialogue inherits Window {
                 text: export_options.voice-pack-id;
                 placeholder-text: "dl_JohnSkyrim";
             }
+            sep-cb := CheckBox {
+                text: "Separate topics";
+                checked: export_options.separate-topics;
+            }
             Rectangle {
                 vertical-stretch: 1;
             }
@@ -52,6 +57,7 @@ export component DBVOExportDialogue inherits Window {
                 clicked => {
                     export_options.voice-pack-name = vpn-te.text;
                     export_options.voice-pack-id = vpid-te.text;
+                    export_options.separate-topics = sep-cb.checked;
                     do_export(export_options);
                 }
             }
