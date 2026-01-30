@@ -221,7 +221,7 @@ impl Sentence {
                     let mut suffix = String::new();
                     let suffix_start = without_prefix.iter().rposition(|c| !decorative_punctuation.contains(&c));
                     let without_suffix = if let Some(suffix_start) = suffix_start && suffix_start != without_prefix.len()-1 {
-                        suffix = chars[suffix_start+1..].iter().collect();
+                        suffix = without_prefix[suffix_start+1..].iter().collect();
                         &without_prefix[..suffix_start+1]
                     }else{
                         &without_prefix[..]
@@ -361,5 +361,14 @@ mod tests {
             let spoken = line.spoken(&substitutions);
             println!("{:?}", spoken);
         }
+    }
+
+    #[test]
+    fn test_substitutions2() {
+        let substitutions = HashMap::<String, String>::new();
+
+        let sentence1 = Sentence::from_string("not sure that \"pleased\" is the right word, friend");
+        let sentence2 = Sentence::from_string("do you know \"The age of Aggression\", perhaps?");
+        let mark = 1+1;
     }
 }
