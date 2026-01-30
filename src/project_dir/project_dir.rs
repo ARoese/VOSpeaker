@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::fs;
-use std::io::{Error, ErrorKind};
-use std::error::Error as ErrorTrait;
-use std::path::{Path, PathBuf};
 use crate::chatterbox_generator::ChatterboxGeneratorConfig;
 use crate::dbvo_manifest::DBVOManifest;
-use crate::topic_dir::TopicDir;
-use crate::topic_lines::TopicExpansionConfig;
+use crate::project_dir::topic_dir::TopicDir;
+use crate::project_dir::topic_lines::TopicExpansionConfig;
+use std::collections::HashMap;
+use std::error::Error as ErrorTrait;
+use std::fs;
+use std::io::{Error, ErrorKind};
+use std::path::{Path, PathBuf};
 
 pub struct ProjectDir {
     pub path: PathBuf
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn test_read(){
         let test_folder_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test_assets/VOSpeaker_test_project");
+            .join("../../test_assets/VOSpeaker_test_project");
         let project = ProjectDir::new(&test_folder_path).unwrap();
         let topics = project.get_topic_dirs().unwrap();
         for topic in topics {

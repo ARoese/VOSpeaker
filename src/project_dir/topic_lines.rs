@@ -1,11 +1,11 @@
+use crate::project_dir::hashes::VOHash;
+use crate::project_dir::topic_lines::ExplodedMember::{RawText, Substitute};
+use crate::project_dir::topic_lines::SentenceFragment::{DecoratedWord, Word};
+use lazy_regex::regex;
+use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use lazy_regex::{regex, Regex};
-use serde::{Deserialize, Serialize};
-use crate::hashes::VOHash;
-use crate::topic_lines::ExplodedMember::{RawText, Substitute};
-use crate::topic_lines::SentenceFragment::{DecoratedWord, Word};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TopicExpansionConfig {

@@ -1,14 +1,13 @@
+use crate::static_resources;
+use lazy_regex::regex;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
-use std::fmt::Display;
+use std::fmt::{Debug, Display, Formatter};
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::OsStringExt;
 use std::path::{Path, PathBuf};
-use lazy_regex::regex;
 use tokio::join;
 use tokio::process::Command;
-use crate::{make_error, static_resources};
-use crate::static_resources::as_real_file;
 // NOTE: All paths will be unix paths until the instant of a subprocess's execution. A user of this
 // module should NOT have to worry about platform-specific stuff
 
@@ -71,7 +70,7 @@ fn agnostic_command(path: &OsStr) -> Command {
 /// takes a wav file and converts it into an xwm file
 pub async fn create_xwm(wav_path: &Path, xwm_destination_path: &Path) -> Result<(), Box<dyn Error>> {
     // convert paths to windows paths
-    let bin_path_file_name = as_real_file(static_resources::WMA_ENCODE_BIN).await?;
+    let bin_path_file_name = static_resources::as_real_file(static_resources::WMA_ENCODE_BIN).await?;
     let (
         encode_bin_path,
         wav_path,
@@ -120,8 +119,8 @@ pub async fn create_lip(
     // make this safe to pass on the commandline
     let dialogue_text = OsString::from(cmdline_string(dialogue_text.to_str().unwrap()));
     // convert paths to windows paths
-    let bin_path_file_name = as_real_file(static_resources::FACE_FX_BIN).await?;
-    let data_path_file_name = as_real_file(static_resources::FONIX_DATA).await?;
+    let bin_path_file_name = static_resources::as_real_file(static_resources::FACE_FX_BIN).await?;
+    let data_path_file_name = static_resources::as_real_file(static_resources::FONIX_DATA).await?;
     let (
         fx_bin_path,
         fonix_data_path,
@@ -178,7 +177,7 @@ pub async fn create_fuz(
     fuz_output_path: &Path,
 ) -> Result<(), Box<dyn Error>> {
     // convert paths to windows paths
-    let bin_path_file_name = as_real_file(static_resources::BML_ENCODE_BIN).await?;
+    let bin_path_file_name = static_resources::as_real_file(static_resources::BML_ENCODE_BIN).await?;
     let (
         bml_bin_path,
         xwm_path,
@@ -220,6 +219,19 @@ pub async fn create_fuz(
     }
 }
 
+#[derive(Debug)]
+struct WavToFuzError {
+    reason: String,
+}
+
+impl Display for WavToFuzError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
+}
+
+impl Error for WavToFuzError {}
+
 // TODO: It might be necessary to make a tmpdir as a working dir for these files. The command lines get quite long, and the dialogue text appears
 // TODO: on them. Shortening the paths by putting them in a tmp dir will make more space. This hasn't been shown to be an issue yet.
 pub async fn wav_to_fuz(wav_path: &Path, dialogue_text: &OsStr, fuz_destination_path: &Path) -> Result<(), Box<dyn Error>> {
@@ -253,7 +265,7 @@ pub async fn wav_to_fuz(wav_path: &Path, dialogue_text: &OsStr, fuz_destination_
     }
 
     if !fuz_destination_path.exists() {
-        return Err(Box::new(make_error(&format!("Output fuz '{}' does not exist, but command also did not fail.", fuz_destination_path.to_string_lossy()))));
+        return Err(Box::new(WavToFuzError{reason: format!("Output fuz '{}' does not exist, but command also did not fail.", fuz_destination_path.to_string_lossy())}));
     }
 
     Ok(())
@@ -261,8 +273,8 @@ pub async fn wav_to_fuz(wav_path: &Path, dialogue_text: &OsStr, fuz_destination_
 
 #[cfg(test)]
 mod tests {
-    use crate::static_resources::{init_resources_dir};
     use super::*;
+    use crate::static_resources::init_resources_dir;
 
     #[tokio::test]
     async fn test_make_fuz() {

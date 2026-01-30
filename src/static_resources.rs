@@ -1,11 +1,11 @@
-use std::cell::{RefCell};
+use static_files::Resource;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{LazyLock, RwLock};
-use static_files::Resource;
 use tempfile::TempDir;
-use tokio::sync::{Mutex};
+use tokio::sync::Mutex;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 

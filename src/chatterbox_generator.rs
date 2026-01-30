@@ -1,14 +1,14 @@
-use std::path::PathBuf;
-use async_trait::async_trait;
-use crate::hashes::{ConfigHash};
 use crate::dialog_generator::{ConfigHashable, DialogGenerationError, DialogGenerator};
+use crate::project_dir::hashes::ConfigHash;
+use crate::project_dir::topic_lines::SpokenTopicLine;
+use crate::ChatterboxConfig;
+use async_trait::async_trait;
 use md5::Context;
 use slint::ToSharedString;
-use tokio::net::TcpStream;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use std::path::PathBuf;
 use tokio::io::BufStream;
-use crate::ChatterboxConfig;
-use crate::topic_lines::SpokenTopicLine;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 pub struct ChatterboxGenerator;
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -106,9 +106,9 @@ impl DialogGenerator for ChatterboxGenerator {
 
 #[cfg(test)]
 mod test{
+    use super::*;
     use std::io::{BufReader, Cursor};
     use std::path::Path;
-    use super::*;
 
     #[tokio::test]
     async fn test_generate_dialog(){

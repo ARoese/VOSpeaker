@@ -1,10 +1,10 @@
+use crate::project_dir::config_map_file::ConfigMapFile;
+use crate::project_dir::hashes::{ConfigHash, VOHash};
+use crate::project_dir::topic_file::TopicFile;
 use std::cell::RefCell;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
-use crate::config_map_file::ConfigMapFile;
-use crate::hashes::{ConfigHash, VOHash};
-use crate::topic_file::TopicFile;
 
 pub struct TopicDir {
     path: PathBuf,

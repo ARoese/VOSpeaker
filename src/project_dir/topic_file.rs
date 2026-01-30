@@ -1,9 +1,8 @@
-use std::fs::{File, OpenOptions};
+use crate::project_dir::topic_lines::RawTopicLine;
+use std::fs::OpenOptions;
 use std::io;
-use std::io::{BufRead, BufReader, Bytes, Error, Read};
+use std::io::{BufRead, Error, Read};
 use std::path::{Path, PathBuf};
-use rodio::cpal::BufferSize::Default;
-use crate::topic_lines::RawTopicLine;
 
 fn read_topic_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
     let file = OpenOptions::new().read(true).open(path)?;

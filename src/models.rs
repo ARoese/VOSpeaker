@@ -1,6 +1,6 @@
-use crate::hashes::ConfigHash;
-use crate::topic_dir::TopicDir;
-use crate::topic_lines::{ExplodedMember, ExplodedRawLine, SubstitutedTopicLine, TopicExpansionConfig};
+use crate::project_dir::hashes::ConfigHash;
+use crate::project_dir::topic_dir::TopicDir;
+use crate::project_dir::topic_lines::{SubstitutedTopicLine, TopicExpansionConfig};
 use crate::TopicDialogLine;
 use slint::{Model, ModelNotify, ModelTracker};
 use std::any::Any;

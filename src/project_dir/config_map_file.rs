@@ -1,9 +1,9 @@
+use crate::project_dir::hashes::{ConfigHash, VOHash, HASH_LEN};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Error, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use crate::hashes::{ConfigHash, VOHash, HASH_LEN};
 
 /*
     # configMap.bin file format specification:
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn test_read(){
         let test_file_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test_assets/configMap.bin");
+            .join("../../test_assets/configMap.bin");
         let mut file = ConfigMapFile::new(&test_file_path).unwrap();
 
         let dummy_vo_hash = VOHash{
@@ -187,7 +187,7 @@ mod tests {
     #[should_panic]
     fn test_double_open(){
         let test_file_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test_assets/configMap.bin");
+            .join("../../test_assets/configMap.bin");
         let file1 = ConfigMapFile::new(&test_file_path).unwrap();
         let file2 = ConfigMapFile::new(&test_file_path).unwrap();
     }

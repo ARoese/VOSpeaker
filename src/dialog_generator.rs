@@ -1,9 +1,9 @@
-use std::io;
+use crate::project_dir::hashes::ConfigHash;
+use crate::project_dir::topic_lines::SpokenTopicLine;
 use async_trait::async_trait;
-use crate::hashes::ConfigHash;
-use thiserror::Error;
 use serde::de::DeserializeOwned;
-use crate::topic_lines::SpokenTopicLine;
+use std::io;
+use thiserror::Error;
 
 /// ConfigHashable is unique to a normal hash in that
 /// it does not need to satisfy a == b -> config_hash(a) == config_hash(b).
