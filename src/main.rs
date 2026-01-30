@@ -110,11 +110,11 @@ fn run_project_picker_gui() -> Result<Option<PathBuf>, Box<dyn Error>> {
         .filter(|p| p.exists())
         .filter(|p| looks_like_project_dir(&p))
         .collect::<HashSet<PathBuf>>();
-    let past_project_dirs_vec = Vec::from_iter(past_project_dirs.clone().into_iter());
-
+    let mut past_project_dirs_vec = Vec::from_iter(past_project_dirs.clone().into_iter());
+    past_project_dirs_vec.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
     let previous_paths = ModelRc::new(
         VecModel::from(
-            past_project_dirs.iter().map(|p| StandardListViewItem::from(p.display().to_shared_string())).collect::<Vec<_>>()
+            past_project_dirs_vec.iter().map(|p| StandardListViewItem::from(p.display().to_shared_string())).collect::<Vec<_>>()
         )
     );
 
