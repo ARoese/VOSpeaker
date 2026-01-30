@@ -198,7 +198,7 @@ struct Cli {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-
+    let cli_had_project_dir = cli.project_dir.is_some();
     let project_dir = if let Some(project_dir) = cli.project_dir {
         project_dir
     }else{
@@ -211,5 +211,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let resources_guard = init_resources_dir();
     run_main_app(project_dir)?;
+    
+    while !cli_had_project_dir && let Some(project_dir) = run_project_picker_gui()? {
+        run_main_app(project_dir)?;
+    }
     Ok(())
 }
