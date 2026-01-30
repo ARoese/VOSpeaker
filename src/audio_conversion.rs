@@ -31,6 +31,7 @@ pub enum AudioPath {
     Mp3(Mp3Path)
 }
 
+static MP3_BITRATE: &str = "96k"; 
 pub async fn wav_to_mp3(src: &WavPath, dst: &Mp3Path) -> Result<(), Box<dyn Error>> {
     // TODO: make this platform-independent
     let dst_certain = dst.with_extension("mp3");
@@ -38,6 +39,8 @@ pub async fn wav_to_mp3(src: &WavPath, dst: &Mp3Path) -> Result<(), Box<dyn Erro
         .arg("-y")
         .arg("-i")
         .arg(src.deref())
+        .arg("-b:a")
+        .arg(MP3_BITRATE)
         .arg(&dst_certain)
         .output().await?;
 
