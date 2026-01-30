@@ -3,11 +3,13 @@ use lazy_regex::regex;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{Debug, Display, Formatter};
+use std::ops::Deref;
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::OsStringExt;
 use std::path::{Path, PathBuf};
 use tokio::join;
 use tokio::process::Command;
+use crate::audio_conversion::WavPath;
 // NOTE: All paths will be unix paths until the instant of a subprocess's execution. A user of this
 // module should NOT have to worry about platform-specific stuff
 
@@ -54,21 +56,19 @@ fn agnostic_command(path: &OsStr) -> Command {
     #[cfg(target_family = "unix")]
     {
         let mut c = Command::new("wine");
-        c.arg(path)
-            .kill_on_drop(true);
+        c.arg(path);
         c
     }
 
     #[cfg(target_family = "windows")]
     {
         let mut c = Command::new(path);
-        c.kill_on_drop(true);
         c
     }
 }
 
 /// takes a wav file and converts it into an xwm file
-pub async fn create_xwm(wav_path: &Path, xwm_destination_path: &Path) -> Result<(), Box<dyn Error>> {
+pub async fn create_xwm(wav_path: &WavPath, xwm_destination_path: &Path) -> Result<(), Box<dyn Error>> {
     // convert paths to windows paths
     let bin_path_file_name = static_resources::as_real_file(static_resources::WMA_ENCODE_BIN).await?;
     let (
@@ -111,8 +111,8 @@ fn cmdline_string(string: &str) -> String {
 
 /// creates a lip file
 pub async fn create_lip(
-    wav_path: &Path,
-    resampled_wav_path: &Path,
+    wav_path: &WavPath,
+    resampled_wav_path: &WavPath,
     lip_destination_path: &Path,
     dialogue_text: &OsStr
 ) -> Result<(), Box<dyn Error>> {
@@ -234,12 +234,13 @@ impl Error for WavToFuzError {}
 
 // TODO: It might be necessary to make a tmpdir as a working dir for these files. The command lines get quite long, and the dialogue text appears
 // TODO: on them. Shortening the paths by putting them in a tmp dir will make more space. This hasn't been shown to be an issue yet.
-pub async fn wav_to_fuz(wav_path: &Path, dialogue_text: &OsStr, fuz_destination_path: &Path) -> Result<(), Box<dyn Error>> {
+pub async fn wav_to_fuz(wav_path: &WavPath, dialogue_text: &OsStr, fuz_destination_path: &Path) -> Result<(), Box<dyn Error>> {
     let xwm_path = wav_path.with_extension("xwm");
     let lip_path = wav_path.with_extension("lip");
     let resampled_wav_path = wav_path
         .with_extension("resampled")
         .with_added_extension("wav");
+    let resampled_wav_path = WavPath::from(resampled_wav_path);
 
     let (
         xwm_encode_result,
@@ -254,7 +255,7 @@ pub async fn wav_to_fuz(wav_path: &Path, dialogue_text: &OsStr, fuz_destination_
 
     // don't need the resampled file
     // TODO: join these futures for performance
-    tokio::fs::remove_file(&resampled_wav_path).await?;
+    tokio::fs::remove_file(&resampled_wav_path.deref()).await?;
 
     create_fuz(&xwm_path, &lip_path, fuz_destination_path).await?;
 
@@ -285,6 +286,7 @@ mod tests {
         tokio::fs::create_dir(&folder_with_spaces).await.unwrap();
         let test_wav_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test_assets/sample_voiceline.wav");
+        let test_wav_path = WavPath::from(test_wav_path);
         let fuz_destination = folder_with_spaces.join("sample_voiceline.fuz");
 
         //let command = Command::new()

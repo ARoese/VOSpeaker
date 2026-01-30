@@ -118,8 +118,7 @@ pub fn init_receivers(ui: &AppWindow) -> (ErrorSender, ProgressSender, Rc<RefCel
     spawn_local({
         let ui_weak = ui.as_weak();
         async move {
-            while let Ok(_) = progress_receiver.changed().await {
-                let ui = ui_weak.upgrade().unwrap();
+            while let Ok(_) = progress_receiver.changed().await && let Some(ui) = ui_weak.upgrade() {
                 ui.set_progress(progress_receiver.borrow().deref().into())
             }
         }

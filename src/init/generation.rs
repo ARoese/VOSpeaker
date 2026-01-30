@@ -12,10 +12,12 @@ use slint::{spawn_local, ComponentHandle, JoinHandle, Model, Weak};
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
+use futures::TryFutureExt;
 use tokio::sync::mpsc;
 use tokio::sync::watch::Sender;
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
+use crate::audio_conversion::{wav_to_mp3, WavPath};
 
 // TODO: make this result for error prop
 async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line_idx: i32) -> Result<(), UIError> {
@@ -31,6 +33,9 @@ async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line
 
     let topic = temp.dialog_lines.as_any().downcast_ref::<TopicModel>()
         .expect("Topic model was not custom type");
+    
+    let mp3_path = topic.audio_path(line_idx as usize)
+        .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", topic_idx)))?;
 
     // slightly naughty construction, but the model is casting from this anyways.
     // TODO: this can be better done by holding and passing around an Rc to the underlying model, and using map models
@@ -47,14 +52,21 @@ async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line
 
     let result = ChatterboxGenerator::generate_dialog(config, clean_line).await
         .map_err(|e| make_error(&format!("{:?}", e)))?;
-
-    // TODO: naughty blocking call. The add_vo function should not be responsible for
-    // TODO: writing the wav file
+    
     let borrow = topic.topic_dir.borrow();
+    
+    let tmp_wav = tempfile::Builder::new().suffix(".wav").tempfile()
+        .map_err(|e| make_error(&format!("Failed to make tmp wav file: {e:?}")))?;
+    let tmp_wav = WavPath::from(tmp_wav.path().to_path_buf());
+    tokio::fs::write(tmp_wav.deref(), result).await
+        .map_err(|e| make_error(&format!("Failed to write tmp wav file: {e:?}")))?;
+    wav_to_mp3(&tmp_wav, &mp3_path).await
+        .map_err(|e| make_error(&format!("Failed to convert wav to mp3: {e:?}")))?;
+
     let topic_dir = borrow.deref().as_ref().ok_or(make_error("topic dir was moved out of model during generation"))?;
-    topic_dir.add_vo(&vo_hash, &config_hash, result)
+    topic_dir.add_vo(&vo_hash, &config_hash)
         .map_err(|err| make_error(&format!("Error writing vo file: {}", err)))?;
-    topic.wav_written_for(line_idx as usize);
+    topic.mp3_written_for(line_idx as usize);
     Ok(())
 }
 

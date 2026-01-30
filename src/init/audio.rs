@@ -4,6 +4,7 @@ use rodio::Sink;
 use slint::{ComponentHandle, Model};
 use std::cell::Cell;
 use std::fs::File;
+use std::ops::Deref;
 
 pub fn init_dialogue_audio(ui: &AppWindow) {
     ui.global::<Audio>().on_play_dialog({
@@ -26,7 +27,7 @@ pub fn init_dialogue_audio(ui: &AppWindow) {
                     // Play the sound directly on the device
                     let sink = rodio::play(
                         &stream_handle.mixer(),
-                        File::open(&path).ok()?
+                        File::open(&path.deref()).ok()?
                     ).ok()?;
                     shared_sink.set(Some(sink));
                     None

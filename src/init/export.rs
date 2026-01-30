@@ -19,10 +19,12 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
+use crate::audio_conversion::{mp3_to_wav, WavPath};
 
 pub struct PackedDialogues {
     pub export_to_folder: FolderExportDialogue,
@@ -100,7 +102,7 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
                 FolderNamingPolicy::MD5Hash => { hash.to_string() }
             };
 
-            let dest = export_file_root.join(&file_name).with_added_extension("wav");
+            let dest = export_file_root.join(&file_name).with_added_extension("mp3");
             // report progress
             let progress = Inflight(Determinate {
                 status: format!("Exporting '{}'", topic.topic_name),
@@ -108,7 +110,7 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
                 progress: i as u64,
             });
             progress_sender.send(progress).expect("failed to send progress");
-            tokio::fs::copy(&src, &dest).await
+            tokio::fs::copy(&src.deref(), &dest).await
                 .map_err(|e| make_error(&format!("Failed to copy '{}' to '{}': {e:?}", src.to_string_lossy(), dest.to_string_lossy())))?;
             //ProgressState::Inflight(ProgressVal::Determinate {})
         }
@@ -163,8 +165,13 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
         processing_set.borrow_mut().remove(&hash);
         return Ok(());
     }
+    let tmp_wav_file = tempfile::Builder::new().suffix(".wav").tempfile()
+        .map_err(|e| make_error(&format!("Failed to create temporary file '{}': {e}", &final_dest.to_string_lossy())))?;
+    let tmp_wav_file = WavPath::from(tmp_wav_file.path().to_path_buf());
+    mp3_to_wav(&src, &tmp_wav_file).await
+        .map_err(|e| make_error(&format!("Failed to make wav file '{}': {e}", &final_dest.to_string_lossy())))?;
 
-    wav_to_fuz(&src, &OsString::from(expanded.0), &cache_dest).await
+    wav_to_fuz(&tmp_wav_file, &OsString::from(expanded.0), &cache_dest).await
         .map_err(|e| make_error(&format!("Failed to create fuz '{}': {e}", &final_dest.to_string_lossy())))?;
 
     tokio::fs::copy(&cache_dest, &final_dest).await
@@ -200,7 +207,7 @@ async fn make_dbvo_dirs(export_folder: &Path, options: &DBVOExportOptions, topic
 
     tokio::fs::write(manifest_dir.join(options.voice_pack_id.clone()).with_extension("json"), manifest_str).await
         .map_err(|e| make_error(&format!("Failed to write DBVO manifest: {e}")))?;
-    
+
     Ok(audio_dir)
 }
 

@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
+use crate::audio_conversion::Mp3Path;
 
 pub struct TopicDir {
     path: PathBuf,
@@ -56,9 +57,9 @@ impl TopicDir {
 
     /// get the path to the wav file associated with the given VOHash. 
     /// The file is not guaranteed to exist.
-    pub fn wav_path(&self, hash: &VOHash) -> PathBuf {
-        let wav_file_name = hash.to_string().to_lowercase() + ".wav";
-        self.path.join(wav_file_name)
+    pub fn mp3_path(&self, hash: &VOHash) -> Mp3Path {
+        let mp3_file_name = hash.to_string().to_lowercase() + ".mp3";
+        Mp3Path::from(self.path.join(mp3_file_name))
     }
 
     pub fn topic_file(&self) -> PathBuf {
@@ -75,9 +76,8 @@ impl TopicDir {
     }
 
     /// add a vo wav file to the topic dir
-    pub fn add_vo(&self, vo_hash: &VOHash, config_hash: &ConfigHash, file: Vec<u8>) -> Result<(), Error> {
+    pub fn add_vo(&self, vo_hash: &VOHash, config_hash: &ConfigHash) -> Result<(), Error> {
         self.config_map.borrow_mut().set_hash(vo_hash, config_hash)?;
-        fs::write(self.wav_path(&vo_hash), file)?;
         Ok(())
     }
 

@@ -9,6 +9,7 @@ mod static_resources;
 mod dbvo_manifest;
 mod init;
 mod project_dir;
+mod audio_conversion;
 
 use crate::dialog_generator::{ConfigHashable, DialogGenerator};
 use crate::static_resources::init_resources_dir;

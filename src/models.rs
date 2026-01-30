@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::path::PathBuf;
+use crate::audio_conversion::Mp3Path;
 
 type SubstitutionsMap = HashMap<String, String>;
 
@@ -64,7 +65,7 @@ impl TopicModel {
         Some(TopicDialogLine {
             substituted_line: line.0.clone().into(),
             clean_line: line.spoken(&self.substitutions.borrow()).0.into(),
-            can_play: topic_dir.wav_path(&line.spoken(&self.substitutions.borrow()).vo_hash()).exists()
+            can_play: topic_dir.mp3_path(&line.spoken(&self.substitutions.borrow()).vo_hash()).exists()
         })
     }
 
@@ -110,16 +111,16 @@ impl TopicModel {
             .collect::<Vec<_>>()
     }
 
-    pub fn audio_path(&self, line: usize) -> Option<PathBuf> {
+    pub fn audio_path(&self, line: usize) -> Option<Mp3Path> {
         let vo_line = self.lines.borrow().get(line)?.clone();
-        Some(self.topic_dir.borrow().as_ref()?.wav_path(&vo_line.spoken(&self.substitutions.borrow()).vo_hash()))
+        Some(self.topic_dir.borrow().as_ref()?.mp3_path(&vo_line.spoken(&self.substitutions.borrow()).vo_hash()))
     }
     
     pub fn line(&self, line_idx: usize) -> Option<SubstitutedTopicLine> {
         self.lines.borrow().get(line_idx)?.clone().into()
     }
     
-    pub fn wav_written_for(&self, line_idx: usize) {
+    pub fn mp3_written_for(&self, line_idx: usize) {
         self.notify.row_changed(line_idx);
     }
 
