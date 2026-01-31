@@ -16,13 +16,14 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &
     let expand_config = Rc::new(TopicExpansionConfig::default());
     let substitutions = Rc::new(HashMap::<String, String>::default());
 
-    let topic_dirs = project_dir.get_topic_dirs().expect("failed to load project topic dirs")
+    let mut topic_dirs = project_dir.get_topic_dirs().expect("failed to load project topic dirs")
         .into_iter().map(|topic_dir|
         TopicListItem{
             topic_name: topic_dir.name().into(),
             dialog_lines: ModelRc::new(TopicModel::new(topic_dir, (*substitutions).clone(), (*expand_config).clone())),
         }
     ).collect::<Vec<_>>();
+    topic_dirs.sort_by(|a,b| a.topic_name.cmp(&b.topic_name));
     let topics_model = Rc::from(VecModel::from(topic_dirs));
 
 
