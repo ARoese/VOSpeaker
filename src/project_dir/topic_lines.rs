@@ -242,7 +242,6 @@ pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
 impl SubstitutedTopicLine {
 
     fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
-        // TODO: Text with quotation marks will duplicate the last letter before the quotation mark. Fix this.
         let lower_substitutions = substitutions.iter().map(|(k,v)| (k.to_lowercase(), v)).collect::<HashMap<_,_>>();
         let sentence = Sentence::from_string(original);
 
@@ -262,18 +261,18 @@ impl SubstitutedTopicLine {
             .collect::<Vec<_>>()
             .join(" ")
     }
-    
+
     fn remove_bracketed(original: &str) -> String {
         let bracket_regex = regex!(r"\[.*?\]");
         bracket_regex.replace_all(original, "").to_string()
     }
-    
+
     pub fn spoken(&self, substitutions: &HashMap<String, String>) -> SpokenTopicLine {
         let trimmed = self.0.trim()
             .split_whitespace()
             .collect::<Vec<&str>>()
             .join(" ");
-        
+
         let without_brackets = Self::remove_bracketed(&trimmed);
 
         // continuously trim parenthesized portions out of the dialogue until doing so results in no change.
