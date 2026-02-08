@@ -262,15 +262,23 @@ impl SubstitutedTopicLine {
             .collect::<Vec<_>>()
             .join(" ")
     }
+    
+    fn remove_bracketed(original: &str) -> String {
+        let bracket_regex = regex!(r"\[.*?\]");
+        bracket_regex.replace_all(original, "").to_string()
+    }
+    
     pub fn spoken(&self, substitutions: &HashMap<String, String>) -> SpokenTopicLine {
         let trimmed = self.0.trim()
             .split_whitespace()
             .collect::<Vec<&str>>()
             .join(" ");
+        
+        let without_brackets = Self::remove_bracketed(&trimmed);
 
         // continuously trim parenthesized portions out of the dialogue until doing so results in no change.
         // TODO: This is very slow. Prefer a parsing approach.
-        let mut without_parens = without_leading_trailing_parens(&trimmed).to_string().trim().to_string();
+        let mut without_parens = without_leading_trailing_parens(&without_brackets).to_string().trim().to_string();
         let mut without_parens_next = without_leading_trailing_parens(&without_parens).to_string().trim().to_string();
         while without_parens_next != without_parens {
             without_parens = without_parens_next.to_string();
