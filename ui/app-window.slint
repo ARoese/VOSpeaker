@@ -16,6 +16,7 @@ export { ProjectSelector }
 export global Dialogs {
     callback show_export_to_folder();
     callback show_export_to_dbvo();
+    callback delete_short_voicelines();
 }
 
 export component AppWindow inherits Window {
@@ -48,6 +49,18 @@ export component AppWindow inherits Window {
                     title: "DBVO mod";
                     activated => {
                         Dialogs.show_export_to_dbvo();
+                    }
+                }
+            }
+        }
+        Menu {
+            title: "Tools";
+            Menu {
+                title: "Batch Actions";
+                MenuItem {
+                    title: "Delete Audio for Short Dialogue";
+                    activated => {
+                        Dialogs.delete_short_voicelines();
                     }
                 }
             }

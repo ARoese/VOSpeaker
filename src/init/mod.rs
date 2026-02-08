@@ -16,4 +16,7 @@ pub use substitutions::*;
 pub mod topics;
 pub use topics::*;
 pub mod export;
+pub mod batch_tools;
+pub use batch_tools::*;
+
 pub use export::*;

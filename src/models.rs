@@ -2,7 +2,7 @@ use crate::project_dir::hashes::ConfigHash;
 use crate::project_dir::topic_dir::TopicDir;
 use crate::project_dir::topic_lines::{SubstitutedTopicLine, TopicExpansionConfig};
 use crate::TopicDialogLine;
-use slint::{Model, ModelNotify, ModelTracker};
+use slint::{Model, ModelNotify, ModelTracker, RenderingNotifier};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -57,6 +57,15 @@ impl TopicModel {
         }
     }
 
+    pub async fn delete_audio_file_for(&self, idx: usize) -> Result<(), Box<dyn std::error::Error>> {
+        let path = self.audio_path(idx).ok_or(format!("idx {idx} does not exist"))?;
+        if path.exists() {
+            tokio::fs::remove_file(&*path).await?;
+        }
+        self.notify.row_changed(idx);
+        Ok(())
+    }
+
     fn make_model_type(&self, line_idx: usize) -> Option<TopicDialogLine> {
         let lines_ref = self.lines.borrow();
         let line = lines_ref.get(line_idx)?;
@@ -76,6 +85,12 @@ impl TopicModel {
         }else{
             return false;
         };
+        
+        if let Some(audio_path) = self.audio_path(line_idx) {
+            if !audio_path.exists() {
+                return true;
+            }
+        }
 
         // don't generate if the line doesn't exist
         self.lines.borrow().get(line_idx).map_or(false, |line| {

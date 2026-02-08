@@ -29,6 +29,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tokio_util::future::FutureExt;
+use crate::init::{init_batch_tools, ProgressHandleSpawner};
 
 slint::include_modules!();
 
@@ -39,6 +40,11 @@ fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
 
     let (error_sender, progress_sender, cancellation_token) = init_receivers(&ui);
 
+    let phs = ProgressHandleSpawner {
+        progress_sender: progress_sender.clone(),
+        error_sender: error_sender.clone(),
+        cancellation: cancellation_token.clone()
+    };
 
     let topics_model = init_topics(&ui, &project_dir, &error_sender);
     let topics_modelrc = ModelRc::new(topics_model.clone());
@@ -53,7 +59,7 @@ fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     init_filters(&ui, &topics_modelrc);
 
     let packed_dialogs = init_export(&ui, &topics_model, &project_dir, &progress_sender, &error_sender, &cancellation_token)?;
-
+    init_batch_tools(&ui, &topics_modelrc, phs.clone())?;
     ui.run()?;
 
     // save configs
