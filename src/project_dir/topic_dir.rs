@@ -6,6 +6,7 @@ use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use crate::audio_conversion::Mp3Path;
+use crate::project_dir::topic_lines::RawTopicLine;
 
 pub struct TopicDir {
     path: PathBuf,
@@ -92,6 +93,10 @@ impl TopicDir {
         drop(self.config_map);
         fs::remove_dir_all(&self.path)?;
         Ok(())
+    }
+    
+    pub fn update_topic_file(&self, other_topic: &Path) -> Result<Vec<RawTopicLine>, Error> {
+        self.topic_file.update_topic_file(other_topic)
     }
 }
 

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use crate::project_dir::topic_lines::RawTopicLine;
 use std::fs::OpenOptions;
 use std::io;
@@ -34,7 +35,7 @@ fn read_topic_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
 
 pub struct TopicFile {
     path: PathBuf,
-    lines: Vec<RawTopicLine>,
+    lines: RefCell<Vec<RawTopicLine>>,
 }
 
 impl TopicFile {
@@ -42,7 +43,7 @@ impl TopicFile {
         let lines = read_topic_lines_from_file(path)?;
         Ok(TopicFile {
             path: path.into(),
-            lines
+            lines: lines.into()
         })
     }
     
@@ -50,7 +51,14 @@ impl TopicFile {
         &self.path
     }
     
-    pub fn lines(&self) -> &Vec<RawTopicLine> {
-        &self.lines
+    pub fn lines(&self) -> Vec<RawTopicLine> {
+        self.lines.borrow().clone()
+    }
+
+    pub fn update_topic_file(&self, new_file: &Path) -> Result<Vec<RawTopicLine>, Error> {
+        std::fs::copy(new_file, &self.path)?;
+
+        *self.lines.borrow_mut() = read_topic_lines_from_file(&self.path)?;
+        Ok(self.lines.borrow().clone())
     }
 }

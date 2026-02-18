@@ -1,13 +1,14 @@
 use crate::project_dir::hashes::ConfigHash;
 use crate::project_dir::topic_dir::TopicDir;
-use crate::project_dir::topic_lines::{SubstitutedTopicLine, TopicExpansionConfig};
+use crate::project_dir::topic_lines::{RawTopicLine, SubstitutedTopicLine, TopicExpansionConfig};
 use crate::TopicDialogLine;
 use slint::{Model, ModelNotify, ModelTracker, RenderingNotifier};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::io::Error;
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::audio_conversion::Mp3Path;
 
 type SubstitutionsMap = HashMap<String, String>;
@@ -28,7 +29,7 @@ pub struct MassGenerationOptions {
 
 impl TopicModel {
     pub fn new(topic_dir: TopicDir, substitutions: SubstitutionsMap, expansions: TopicExpansionConfig) -> TopicModel {
-        let expanded_lines = Self::compute_expanded_lines(&topic_dir, &expansions, &substitutions);
+        let expanded_lines = Self::compute_expanded_lines(&topic_dir.topic_file_ref().lines(), &expansions, &substitutions);
         TopicModel {
             lines: expanded_lines.into(),
             topic_dir: Some(topic_dir).into(),
@@ -49,7 +50,7 @@ impl TopicModel {
         if let Some(topic_dir) = self.topic_dir.borrow().deref() {
             self.expansion_config.replace(new_expansions);
             self.lines.replace(Self::compute_expanded_lines(
-                topic_dir,
+                &topic_dir.topic_file_ref().lines(),
                 &self.expansion_config.borrow(),
                 &self.substitutions.borrow()
             ));
@@ -111,8 +112,8 @@ impl TopicModel {
         })
     }
 
-    fn compute_expanded_lines(topic_dir: &TopicDir, config: &TopicExpansionConfig, substitutions: &SubstitutionsMap) -> Vec<SubstitutedTopicLine> {
-        topic_dir.topic_file_ref().lines()
+    fn compute_expanded_lines(raw_lines: &Vec<RawTopicLine>, config: &TopicExpansionConfig, substitutions: &SubstitutionsMap) -> Vec<SubstitutedTopicLine> {
+        raw_lines
             .iter().flat_map(|line| {line.substitute(&config)})
             // do not show empty lines
             .filter(|line| !line.spoken(&substitutions).0.is_empty())
@@ -157,6 +158,19 @@ impl TopicModel {
             .flat_map(|line| {line.globals()})
             .collect()
          */
+    }
+    
+    pub fn update_topic_file(&self, other_topic: &Path) -> Result<(), Error> {
+        let topic_dir = self.topic_dir.borrow();
+        let Some(topic_dir) = topic_dir.as_ref() else{
+            return Ok(())
+        };
+        
+        let new_lines = topic_dir.update_topic_file(other_topic)?;
+        *self.lines.borrow_mut() = Self::compute_expanded_lines(&new_lines, &self.expansion_config.borrow(), &self.substitutions.borrow());
+        self.notify.reset();
+        
+        Ok(())
     }
 }
 
