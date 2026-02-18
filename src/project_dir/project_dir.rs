@@ -7,9 +7,17 @@ use std::error::Error as ErrorTrait;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+use crate::FOMODExportOptions;
 
 pub struct ProjectDir {
     pub path: PathBuf
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct FomodPaths {
+    pub src: PathBuf,
+    pub dest: PathBuf,
 }
 
 impl ProjectDir {
@@ -45,6 +53,7 @@ impl ProjectDir {
         Ok(topics)
     }
 
+    // TODO: make this into a single serializable state object. That will make this less repetitive
     const EXPANSIONS_CONF_NAME: &str = "expansions.toml";
     pub fn load_expansion_config(&self) -> Result<TopicExpansionConfig, Box<dyn ErrorTrait>> {
         let expansions_path = self.path.join(Self::EXPANSIONS_CONF_NAME);
@@ -93,11 +102,24 @@ impl ProjectDir {
         let dbvo_manifest_text = fs::read_to_string(&dbvo_manifest_path)?;
         Ok(serde_json::from_str::<DBVOManifest>(&dbvo_manifest_text)?)
     }
-    
     pub fn save_last_dbvo_manifest(&self, dbvo_manifest: DBVOManifest) -> Result<(), Box<dyn ErrorTrait>> {
-        let dbvo_manifest_path = self.path.join(Self::DBVO_MANIFEST_NAME);
-        let dbvo_manifest_text = serde_json::to_string(&dbvo_manifest)?;
-        Ok(fs::write(&dbvo_manifest_path, dbvo_manifest_text)?)
+        let dbvo_path = self.path.join(Self::DBVO_MANIFEST_NAME);
+        let dbvo_text = serde_json::to_string(&dbvo_manifest)?;
+        Ok(fs::write(&dbvo_path, dbvo_text)?)
+    }
+
+    const FOMOD_PATHS_FILE_NAME: &str = "last_fomod_paths.toml";
+
+    pub fn save_last_fomod_paths(&self, fomod_paths: FomodPaths) -> Result<(), Box<dyn ErrorTrait>> {
+        let fomod_path = self.path.join(Self::FOMOD_PATHS_FILE_NAME);
+        let fomod_text = serde_json::to_string(&fomod_paths)?;
+        Ok(fs::write(&fomod_path, fomod_text)?)
+    }
+
+    pub fn load_last_fomod_paths(&self) -> Result<FomodPaths, Box<dyn ErrorTrait>> {
+        let fomod_path = self.path.join(Self::FOMOD_PATHS_FILE_NAME);
+        let fomod_paths_text = fs::read_to_string(&fomod_path)?;
+        Ok(serde_json::from_str::<FomodPaths>(&fomod_paths_text)?)
     }
 }
 

@@ -3,50 +3,68 @@ use lazy_regex::regex;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{Debug, Display, Formatter};
+use std::io::BufRead;
 use std::ops::Deref;
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::OsStringExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 use tokio::join;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 use crate::audio_conversion::WavPath;
 // NOTE: All paths will be unix paths until the instant of a subprocess's execution. A user of this
 // module should NOT have to worry about platform-specific stuff
 
-/// uses winepath to get the correct windows path for a given unix path
-async fn windows_path(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
+// only this winepath processes allowed at once, because it is very CPU-intensive.
+// This lets us create tons of fuz files without the initial cpu spike causing chaos.
+const WINEPATH_SEMAPHORE: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(16)));
+async fn windows_paths<const LEN: usize>(paths: [&Path; LEN]) -> Result<[PathBuf; LEN], Box<dyn Error>> {
     #[cfg(target_family = "unix")]
     {
-        let output = Command::new("winepath")
-            .arg("-w")
-            .arg(path)
-            .output().await?;
+        let semaphore_ref = WINEPATH_SEMAPHORE.deref().clone();
+        let winepath_permit = semaphore_ref.acquire().await?;
+        let mut command = Command::new("winepath");
+        let mut command = command.arg("-w").arg("-0");
+
+        for path in paths {
+            command = command.arg(path);
+        }
+        let output = command.output().await?;
 
         if !output.status.success() {
             return Err(format!("winepath failed. StdOut: {}", String::from_utf8_lossy(&output.stderr)).into());
         }
 
-        let mut stdout = output.stdout;
-        // remove newline if present; it's not part of the real path
-        if stdout[stdout.len() - 1] == b'\n' {
-            stdout.pop();
-        }
+        let paths: [PathBuf;LEN] = output.stdout
+            .split(|c| c.eq(&0))
+            .filter(|path| !path.is_empty())
+            .map(|p| PathBuf::from(OsString::from_vec(p.to_vec())))
+            .collect::<Vec<_>>()
+            .try_into()
+            .map_err(|e| {
+                eprintln!("{:?}", str::from_utf8(&output.stdout));
+                "Invalid winepath output".to_string()
+            })?;
 
-        /*
-        for item in stdout.iter_mut() {
-            if *item == b'\\' {
-                *item = b'/';
-            }
-        }
-         */
-
-        Ok(PathBuf::from(OsString::from_vec(stdout)))
+        Ok(paths)
     }
 
     #[cfg(target_family = "windows")]
     {
-        Ok(PathBuf::from(path))
+        let arr: [PathBuf; LEN] = paths.iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("same-size mapping");
+        Ok(arr)
     }
+}
+
+/// uses winepath to get the correct windows path for a given unix path
+async fn windows_path(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    let [res] = windows_paths([path]).await?;
+    Ok(res)
 }
 
 // Here, `path` must be a valid windows path. Use `windows_path()` for this
@@ -71,19 +89,15 @@ fn agnostic_command(path: &OsStr) -> Command {
 pub async fn create_xwm(wav_path: &WavPath, xwm_destination_path: &Path) -> Result<(), Box<dyn Error>> {
     // convert paths to windows paths
     let bin_path_file_name = static_resources::as_real_file(static_resources::WMA_ENCODE_BIN).await?;
-    let (
+    let [
         encode_bin_path,
         wav_path,
         xwm_destination_path
-    ) = join!(
-        windows_path(&bin_path_file_name),
-        windows_path(wav_path),
-        windows_path(xwm_destination_path)
-    );
-
-    let encode_bin_path = encode_bin_path?;
-    let wav_path = wav_path?;
-    let xwm_destination_path = xwm_destination_path?;
+    ] = windows_paths([
+        &bin_path_file_name,
+        wav_path,
+        xwm_destination_path
+    ]).await?;
 
     // run xWMAEncode command
     let mut command = agnostic_command(encode_bin_path.as_os_str());
@@ -121,33 +135,19 @@ pub async fn create_lip(
     // convert paths to windows paths
     let bin_path_file_name = static_resources::as_real_file(static_resources::FACE_FX_BIN).await?;
     let data_path_file_name = static_resources::as_real_file(static_resources::FONIX_DATA).await?;
-    let (
+    let [
         fx_bin_path,
         fonix_data_path,
         wav_path,
         resampled_wav_path,
         lip_destination_path
-    ) = join!(
-        windows_path(&bin_path_file_name),
-        windows_path(&data_path_file_name),
-        windows_path(wav_path),
-        windows_path(resampled_wav_path),
-        windows_path(lip_destination_path)
-    );
-
-    let (
-        fx_bin_path,
-        fonix_data_path,
+    ] = windows_paths([
+        &bin_path_file_name,
+        &data_path_file_name,
         wav_path,
         resampled_wav_path,
         lip_destination_path
-    ) = (
-        fx_bin_path?,
-        fonix_data_path?,
-        wav_path?,
-        resampled_wav_path?,
-        lip_destination_path?
-    );
+    ]).await?;
 
     // run FaceFXWrapper command
     let mut command = agnostic_command(fx_bin_path.as_os_str());
@@ -178,29 +178,17 @@ pub async fn create_fuz(
 ) -> Result<(), Box<dyn Error>> {
     // convert paths to windows paths
     let bin_path_file_name = static_resources::as_real_file(static_resources::BML_ENCODE_BIN).await?;
-    let (
+    let [
         bml_bin_path,
         xwm_path,
         lip_path,
         fuz_output_path
-    ) = join!(
-        windows_path(&bin_path_file_name),
-        windows_path(xwm_path),
-        windows_path(lip_path),
-        windows_path(fuz_output_path)
-    );
-
-    let (
-        bml_bin_path,
+    ] = windows_paths([
+        &bin_path_file_name,
         xwm_path,
         lip_path,
         fuz_output_path
-    ) = (
-        bml_bin_path?,
-        xwm_path?,
-        lip_path?,
-        fuz_output_path?
-    );
+    ]).await?;
 
     let mut command = agnostic_command(bml_bin_path.as_os_str());
     let command = command

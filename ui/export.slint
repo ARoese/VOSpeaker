@@ -20,6 +20,84 @@ export struct DBVOExportOptions {
     separate_topics: bool
 }
 
+export struct FOMODExportOptions {
+    voice_pack_name: string,
+    voice_pack_id: string,
+    reference_path: string,
+    output_path: string
+}
+
+export global PathSelection {
+    pure callback select_folder_path(default: string) -> string;
+}
+
+export component FolderPathInput inherits HorizontalLayout {
+    in-out property <string> path;
+
+    LineEdit {
+        text <=> path;
+    }
+    Button {
+        text: "Pick Path";
+        clicked => { path = PathSelection.select_folder_path(path) }
+    }
+}
+
+export component FOMODExportDialogue inherits Window {
+    in-out property <FOMODExportOptions> export_options;
+        callback do_export(FOMODExportOptions);
+
+        title: "Export to FOMOD";
+        preferred-height: 190px;
+        preferred-width: 280px;
+        Rectangle {
+            background: Palette.background;
+
+            VerticalLayout {
+                Text {
+                    text: "Voice Pack Name:";
+                }
+                vpn-te := LineEdit {
+                    text: export_options.voice-pack-name;
+                    placeholder-text: "John Skyrim";
+                }
+                Text {
+                    text: "Voice Pack ID:";
+                }
+                vpid-te := LineEdit {
+                    text: export_options.voice-pack-id;
+                    placeholder-text: "dl_JohnSkyrim";
+                }
+
+                Text {
+                    text: "Reference FOMOD:";
+                }
+                ref-p := FolderPathInput {
+                    path: export_options.reference-path;
+                }
+                Text {
+                    text: "Destination:";
+                }
+                target-p := FolderPathInput {
+                    path: export_options.reference-path;
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+                Button {
+                    text: "Export to DBVO";
+                    clicked => {
+                        export_options.voice-pack-name = vpn-te.text;
+                        export_options.voice-pack-id = vpid-te.text;
+                        export_options.reference-path = ref-p.path;
+                        export_options.output-path = target-p.path;
+                        do_export(export_options);
+                    }
+                }
+            }
+        }
+}
+
 export component DBVOExportDialogue inherits Window {
     in-out property <DBVOExportOptions> export_options;
     callback do_export(DBVOExportOptions);

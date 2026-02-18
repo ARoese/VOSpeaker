@@ -7,28 +7,31 @@ use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::Determinate;
 use crate::models::TopicModel;
 use crate::project_dir::hashes::VOHash;
-use crate::project_dir::project_dir::ProjectDir;
+use crate::project_dir::project_dir::{FomodPaths, ProjectDir};
 use crate::project_dir::topic_lines::SpokenTopicLine;
-use crate::{AppWindow, DBVOExportDialogue, DBVOExportOptions, Dialogs, FolderExportDialogue, FolderExportOptions, FolderNamingPolicy, TopicListItem, UIError};
+use crate::{AppWindow, DBVOExportDialogue, DBVOExportOptions, Dialogs, FOMODExportDialogue, FOMODExportOptions, FolderExportDialogue, FolderExportOptions, FolderNamingPolicy, PathSelection, TopicListItem, UIError};
 use async_compat::Compat;
 use futures::{stream, StreamExt};
 use lazy_regex::regex;
-use slint::{spawn_local, ComponentHandle, Model, ToSharedString, VecModel};
+use slint::{spawn_local, ComponentHandle, Model, SharedString, ToSharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
+use std::fs::DirEntry;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use serde::{Serialize, Serializer};
 use tokio_util::future::FutureExt;
 use tokio_util::sync::CancellationToken;
 use crate::audio_conversion::{mp3_to_wav, WavPath};
 
 pub struct PackedDialogues {
     pub export_to_folder: FolderExportDialogue,
-    pub export_to_dbvo: DBVOExportDialogue
+    pub export_to_dbvo: DBVOExportDialogue,
+    pub export_to_fomod: FOMODExportDialogue
 }
 
 fn format_as_file(name: String) -> String {
@@ -211,7 +214,7 @@ async fn make_dbvo_dirs(export_folder: &Path, options: &DBVOExportOptions, topic
     Ok(audio_dir)
 }
 
-async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+async fn export_to_dbvo_action(topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
     if options.voice_pack_name.is_empty() || options.voice_pack_id.is_empty() {
         return Err(make_error("Exporting with an empty voice pack name or voice pack id makes no sense. These values are important for loading the DBVO!"));
     }
@@ -219,8 +222,7 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         .set_title("Select Export Folder")
         .pick_folder();
 
-    if export_folder.is_none() { return Ok(()); }
-    let export_folder = export_folder.unwrap();
+    let Some(export_folder) = export_folder else { return Ok(()); };
 
     let file_count = fs::read_dir(export_folder.clone())
         .map_err(|_| make_error(&format!("The folder '{}' could not be accessed.", export_folder.to_string_lossy())))?
@@ -238,41 +240,145 @@ async fn do_export_to_dbvo(topics_model: &Rc<VecModel<TopicListItem>>, options: 
         export_folder
     };
 
-    for topic in topics_model.iter() {
-        let topic_model = topic.dialog_lines
-            .as_any()
-            .downcast_ref::<TopicModel>()
-            .expect("Topic model was not of custom type");
+    do_export_to_dbvo(&export_folder, topics_model, options, progress_sender).await
+}
 
-        let num_dialogues = topic_model.row_count();
+async fn export_topic_to_dbvo(topic: &TopicListItem, export_folder: &Path, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+    let topic_model = topic.dialog_lines
+        .as_any()
+        .downcast_ref::<TopicModel>()
+        .expect("Topic model was not of custom type");
 
+    let num_dialogues = topic_model.row_count();
+
+    let progress = Inflight(Determinate {
+        status: format!("Preparing to export '{}'", topic.topic_name),
+        range: 0..num_dialogues as u64,
+        progress: 0,
+    });
+
+    progress_sender.send(progress).expect("failed to send progress");
+
+    let fuz_dir = make_dbvo_dirs(&export_folder, &options, &topic.topic_name).await?;
+
+    const CONCURRENCY_FACTOR: usize = 32;
+    let processing_set = Rc::new(RefCell::new(HashSet::<VOHash>::with_capacity(CONCURRENCY_FACTOR)));
+    let mut processing_stream = stream::iter(0..num_dialogues)
+        .map(|i| {
+            process_export_fuz(i, &topic_model, &fuz_dir, processing_set.clone())
+        }).buffer_unordered(CONCURRENCY_FACTOR);
+
+    let mut i: u64 = 0;
+    while let Some(result) = processing_stream.next().await {
+        result?;
+        // report progress
         let progress = Inflight(Determinate {
-            status: format!("Preparing to export '{}'", topic.topic_name),
+            status: format!("Exporting '{}'", topic.topic_name),
             range: 0..num_dialogues as u64,
-            progress: 0,
+            progress: i,
         });
         progress_sender.send(progress).expect("failed to send progress");
+        i+=1;
+    }
 
-        let fuz_dir = make_dbvo_dirs(&export_folder, &options, &topic.topic_name).await?;
+    Ok(())
+}
 
-        const CONCURRENCY_FACTOR: usize = 32;
-        let processing_set = Rc::new(RefCell::new(HashSet::<VOHash>::with_capacity(CONCURRENCY_FACTOR)));
-        let mut processing_stream = stream::iter(0..num_dialogues)
-            .map(|i| {
-                process_export_fuz(i, &topic_model, &fuz_dir, processing_set.clone())
-            }).buffer_unordered(CONCURRENCY_FACTOR);
+async fn do_export_to_dbvo(export_folder: &Path, topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+    for topic in topics_model.iter() {
+        export_topic_to_dbvo(&topic, export_folder, options, progress_sender).await?
+    }
 
-        let mut i: u64 = 0;
-        while let Some(result) = processing_stream.next().await {
-            result?;
-            // report progress
-            let progress = Inflight(Determinate {
-                status: format!("Exporting '{}'", topic.topic_name),
-                range: 0..num_dialogues as u64,
-                progress: i,
-            });
-            progress_sender.send(progress).expect("failed to send progress");
-            i+=1;
+    Ok(())
+}
+
+fn select_folder_path(default: SharedString) -> SharedString {
+    let res = rfd::FileDialog::new().set_title("Select Folder").pick_folder();
+
+    let Some(path) = res else {
+        return default;
+    };
+
+    return path.to_string_lossy().to_shared_string();
+}
+
+fn read_subdirs_safe(path: &Path) -> Result<Vec<DirEntry>, UIError> {
+    let res = path.read_dir()
+        .map_err(|e| make_error(&format!("Failed to read reference fomod: {e}")))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| make_error(&format!("Failed to read reference fomod: {e}")))?
+        .into_iter().filter(|e| e.path().is_dir())
+        .collect::<Vec<_>>();
+
+    Ok(res)
+}
+
+fn read_files_safe(path: &Path) -> Result<Vec<DirEntry>, UIError> {
+    let res = path.read_dir()
+        .map_err(|e| make_error(&format!("Failed to read reference fomod: {e}")))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| make_error(&format!("Failed to read reference fomod: {e}")))?
+        .into_iter().filter(|e| e.path().is_file())
+        .collect::<Vec<_>>();
+
+    Ok(res)
+}
+
+/// returns (reference VO mod name, Mod name)
+fn get_mod_name(string: &str) -> Option<(String, String)> {
+    let (dbvomn, mn) = string.split_once(" - ")?;
+    Some((
+        dbvomn.to_string(),
+        mn.to_string()
+    ))
+}
+
+async fn do_export_to_fomod(topics_model: &Rc<VecModel<TopicListItem>>, options: &FOMODExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+    if options.reference_path.is_empty() || options.output_path.is_empty() {
+        return Err(make_error("Reference FOMOD or output path was empty"));
+    }
+
+    if options.reference_path == options.output_path {
+        return Err(make_error("Cannot output to reference dir"));
+    }
+
+    let reference_fomod = PathBuf::from(options.reference_path.to_string());
+    let output_fomod = PathBuf::from(options.output_path.to_string());
+
+    let group_dirs = read_subdirs_safe(&reference_fomod)?;
+    tokio::fs::create_dir_all(&output_fomod).await
+        .map_err(|e| make_error(&format!("Failed to create output dir: {e}")))?;
+
+    for group_dir in group_dirs {
+        let dest_group_dir = output_fomod.join(group_dir.file_name());
+
+        let mod_dirs = read_subdirs_safe(&group_dir.path())?;
+        for mod_dir in mod_dirs {
+            let Some((_, mod_name)) = get_mod_name(&mod_dir.file_name().to_string_lossy()) else {continue};
+
+            let dest_mod_dir = dest_group_dir.join(format!("{} - {}", options.voice_pack_name.to_string().replace(" ", ""), mod_name));
+
+            let topic_item = topics_model.iter().find(|e| e.topic_name.to_string() == mod_name);
+            let Some(topic_item) = topic_item else {continue};
+            let dbvo_options = DBVOExportOptions {
+                separate_topics: false,
+                voice_pack_id: options.voice_pack_id.clone(),
+                voice_pack_name: options.voice_pack_name.clone(),
+            };
+
+            // export fuz files
+            tokio::fs::create_dir_all(&dest_mod_dir).await
+                .map_err(|e| make_error(&format!("Failed to make destination dir: {e}")))?;
+            export_topic_to_dbvo(&topic_item, &dest_mod_dir, &dbvo_options, progress_sender).await?;
+
+            // copy esp patches to same dir
+            for file in read_files_safe(&mod_dir.path())?.into_iter().filter(|e| e.path().is_file()) {
+                let dest_file_name = dest_mod_dir.join(file.file_name());
+                if file.file_name().to_string_lossy().contains(".esp") {
+                    tokio::fs::copy(file.path(), dest_file_name).await
+                        .map_err(|e| make_error(&format!("Failed to copy esp file: {e}")))?;
+                }
+            }
         }
     }
 
@@ -289,11 +395,15 @@ pub fn init_export(
 ) -> Result<PackedDialogues, Box<dyn Error>> {
     let export_to_folder = FolderExportDialogue::new()?;
     let export_to_dbvo = DBVOExportDialogue::new()?;
+    let export_to_fomod = FOMODExportDialogue::new()?;
     let progress_handle_spawner = ProgressHandleSpawner {
         progress_sender: progress_sender.clone(),
         error_sender: error_sender.clone(),
         cancellation: cancellation_token.clone(),
     };
+
+    ui.global::<PathSelection>().on_select_folder_path(select_folder_path);
+    export_to_fomod.global::<PathSelection>().on_select_folder_path(select_folder_path);
 
     let ui_dbvo_manifest = project_dir.load_last_dbvo_manifest()
         .map(|m| DBVOExportOptions {
@@ -302,7 +412,20 @@ pub fn init_export(
             separate_topics: false
         })
         .unwrap_or_else(|_| DBVOExportOptions::default());
-    export_to_dbvo.set_export_options(ui_dbvo_manifest);
+    export_to_dbvo.set_export_options(ui_dbvo_manifest.clone());
+
+    let mut ui_fomod_manifest = project_dir.load_last_fomod_paths()
+        .map(|paths| {
+            FOMODExportOptions {
+                output_path: paths.dest.to_string_lossy().to_shared_string(),
+                reference_path: paths.src.to_string_lossy().to_shared_string(),
+                voice_pack_id: ui_dbvo_manifest.voice_pack_id.to_shared_string(),
+                voice_pack_name: ui_dbvo_manifest.voice_pack_name.to_shared_string(),
+            }
+        }).unwrap_or_default();
+    ui_fomod_manifest.voice_pack_id = ui_dbvo_manifest.voice_pack_id.to_shared_string();
+    ui_fomod_manifest.voice_pack_name = ui_dbvo_manifest.voice_pack_name.to_shared_string();
+    export_to_fomod.set_export_options(ui_fomod_manifest);
 
     ui.global::<Dialogs>().on_show_export_to_folder({
         let to_folder_weak = export_to_folder.as_weak();
@@ -318,6 +441,16 @@ pub fn init_export(
         let to_dbvo_weak = export_to_dbvo.as_weak();
         move || {
             if let Some(strong) = to_dbvo_weak.upgrade(){
+                let res = strong.show();
+                res.expect("Failed to show popup");
+            }
+        }
+    });
+
+    ui.global::<Dialogs>().on_show_export_to_fomod({
+        let to_fomod_weak = export_to_fomod.as_weak();
+        move || {
+            if let Some(strong) = to_fomod_weak.upgrade(){
                 let res = strong.show();
                 res.expect("Failed to show popup");
             }
@@ -369,7 +502,7 @@ pub fn init_export(
 
 
             let future = Compat::new(async move {
-                let result = do_export_to_dbvo(&topics_model, &options, &progress_handle.progress_sender)
+                let result = export_to_dbvo_action(&topics_model, &options, &progress_handle.progress_sender)
                     .with_cancellation_token(&progress_handle.cancellation).await;
                 if let Some(Err(e)) = result {
                     progress_handle.error_sender.send(e).await.expect("Failed to send error");
@@ -382,6 +515,43 @@ pub fn init_export(
         }
     });
 
+    export_to_fomod.on_do_export({
+        let export_weak = export_to_fomod.as_weak();
+        let ui_weak = ui.as_weak();
+        let topics_model_weak = Rc::downgrade(&topics_model);
+        let progress_handle_spawner = progress_handle_spawner.clone();
+        let project_dir = project_dir.clone();
+        move |options| {
+            // TODO: panic less here
+            let export_to_fomod = export_weak.upgrade().expect("failed to upgrade ui");
+            let topics_model = topics_model_weak.upgrade().expect("failed to upgrade topics model");
+            let ui = ui_weak.upgrade().expect("failed to upgrade ui");
+            let progress_handle = progress_handle_spawner.spawn();
+            project_dir.save_last_fomod_paths(FomodPaths {
+                src: options.reference_path.to_string().into(),
+                dest: options.output_path.to_string().into(),
+            }).ok(); // if the write fails, it's not really a big deal
 
-    Ok(PackedDialogues {export_to_folder, export_to_dbvo})
+            project_dir.save_last_dbvo_manifest(DBVOManifest {
+                voice_pack_name: options.voice_pack_name.to_string(),
+                voice_pack_id: options.voice_pack_id.to_string()
+            }).ok();
+
+
+            let future = Compat::new(async move {
+                let result = do_export_to_fomod(&topics_model, &options, &progress_handle.progress_sender)
+                    .with_cancellation_token(&progress_handle.cancellation).await;
+                if let Some(Err(e)) = result {
+                    progress_handle.error_sender.send(e).await.expect("Failed to send error");
+                }
+                progress_handle.progress_sender.send(Done).expect("failed to send progress");
+            });
+
+            spawn_local(future).expect("Failed to spawn export task");
+            export_to_fomod.hide().expect("Failed to hide dialogue");
+        }
+    });
+
+
+    Ok(PackedDialogues {export_to_folder, export_to_dbvo, export_to_fomod})
 }

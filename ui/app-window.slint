@@ -6,9 +6,9 @@ import { ExpansionsEditor } from "expansions.slint";
 import { Mappings, Expansion } from "expansions.slint";
 import { SubstitutionsEditor, SubstitutionsActions } from "substitutions.slint";
 import { UIError, ErrorToastActions, ErrorToasts } from "errors.slint";
-import { FolderExportDialogue, DBVOExportDialogue } from "export.slint";
+import { FolderExportDialogue, DBVOExportDialogue, FOMODExportDialogue, PathSelection } from "export.slint";
 import { EditDialogueFilter, DialogueFilterOptions } from "filter.slint";
-export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions, ErrorToastActions, FolderExportDialogue, DBVOExportDialogue, FilterActions }
+export  { Audio, GenerationActions, FilePicking, ProgressActions, Mappings, SubstitutionsActions, ErrorToastActions, FolderExportDialogue, DBVOExportDialogue, FOMODExportDialogue, PathSelection, FilterActions }
 
 import { ProjectSelector } from "project_selector.slint";
 export { ProjectSelector }
@@ -16,6 +16,7 @@ export { ProjectSelector }
 export global Dialogs {
     callback show_export_to_folder();
     callback show_export_to_dbvo();
+    callback show_export_to_fomod();
     callback delete_short_voicelines();
 }
 
@@ -49,6 +50,12 @@ export component AppWindow inherits Window {
                     title: "DBVO mod";
                     activated => {
                         Dialogs.show_export_to_dbvo();
+                    }
+                }
+                MenuItem {
+                    title: "FOMOD";
+                    activated => {
+                        Dialogs.show_export_to_fomod();
                     }
                 }
             }
