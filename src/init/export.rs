@@ -20,6 +20,7 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
 use std::fs::DirEntry;
+use std::hash::Hash;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -137,7 +138,46 @@ fn is_newer_than(a: &Path, b: &Path) -> bool {
     }
 }
 
-async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path, processing_set: Rc<RefCell<HashSet<VOHash>>>) -> Result<(), UIError> {
+/// Users can declare that they will be working on a specific task identified by a given hash.
+/// In return, they are given a ticket representing their allotment. Other users declaring
+/// work on that task before the ticket is dropped will be denied.
+#[derive(Clone)]
+struct ProcessingTicker<T: Hash + Eq + Clone> {
+    taken: RefCell<HashSet<T>>,
+}
+
+impl<'a, T: Hash + Eq + Clone> ProcessingTicker<T> {
+    fn new() -> ProcessingTicker<T> {
+        ProcessingTicker { taken: RefCell::new(HashSet::<T>::new())}
+    }
+
+    fn declare(&'a self, key: T) -> Option<ProcessingTickerTicket<'a, T>> {
+        if self.taken.borrow().contains(&key) {
+            None
+        }else{
+            self.taken.borrow_mut().insert(key.clone());
+            ProcessingTickerTicket{
+                ticker: &self,
+                key_to_remove: key
+            }.into()
+        }
+    }
+}
+
+/// drop guard; when this is dropped, the associated key is removed from the ticker that created this ticket.
+// 'a is the lifetime of the associated ProcessingTicker
+struct ProcessingTickerTicket<'a, T: Hash + Eq + Clone> {
+    ticker: &'a ProcessingTicker<T>,
+    key_to_remove: T
+}
+
+impl<'a, T: Hash + Eq + Clone> Drop for ProcessingTickerTicket<'a, T> {
+    fn drop(&mut self) {
+        self.ticker.taken.borrow_mut().remove(&self.key_to_remove);
+    }
+}
+
+async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path, processing_ticker: &ProcessingTicker<VOHash>) -> Result<(), UIError> {
     // mut access to the processing_set refcell is safe here if the mut ref is never held across an async boundary
     // and futures are not advanced on separate threads (this scenario should be impossible to compile anyways because there is no mutex)
     let changed_err = make_error("Model changed when exporting.");
@@ -148,24 +188,18 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
 
     let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
     let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
-    if processing_set.borrow().contains(&hash) {
-        // someone else is already processing this. Let them handle it.
+    let Some(_processing_ticket) = processing_ticker.declare(hash) else {
         return Ok(());
-    }
+    };
     // mark this hash as being processed
-    // TODO: make this cleaner with a dropguard or something
-    processing_set.borrow_mut().insert(hash);
     let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
     let file_name = format_as_file(expanded.0.clone());
     let cache_dest = src.with_extension("fuz");
     let final_dest = audio_dir.join(&file_name).with_added_extension("fuz");
     // if the fuz file is newer than the wav file, we don't need to re-process it
     if cache_dest.exists() && is_newer_than(&cache_dest, &src) {
-        // unmark this hash as being processed. From this point on,
-        // the fuz file's existence will prevent reprocessing
         tokio::fs::copy(&cache_dest, &final_dest).await
             .map_err(|e| make_error(&format!("Failed to move created fuz '{}': {e}", &final_dest.to_string_lossy())))?;
-        processing_set.borrow_mut().remove(&hash);
         return Ok(());
     }
     let tmp_wav_file = tempfile::Builder::new().suffix(".wav").tempfile()
@@ -180,9 +214,6 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
     tokio::fs::copy(&cache_dest, &final_dest).await
         .map_err(|e| make_error(&format!("Failed to move created fuz '{}': {e}", &final_dest.to_string_lossy())))?;
 
-    // unmark this hash as being processed. From this point on,
-    // the fuz file's existence will prevent reprocessing
-    processing_set.borrow_mut().remove(&hash);
     Ok(())
 }
 
@@ -262,10 +293,10 @@ async fn export_topic_to_dbvo(topic: &TopicListItem, export_folder: &Path, optio
     let fuz_dir = make_dbvo_dirs(&export_folder, &options, &topic.topic_name).await?;
 
     const CONCURRENCY_FACTOR: usize = 32;
-    let processing_set = Rc::new(RefCell::new(HashSet::<VOHash>::with_capacity(CONCURRENCY_FACTOR)));
+    let processing_ticker = ProcessingTicker::<VOHash>::new();
     let mut processing_stream = stream::iter(0..num_dialogues)
         .map(|i| {
-            process_export_fuz(i, &topic_model, &fuz_dir, processing_set.clone())
+            process_export_fuz(i, &topic_model, &fuz_dir, &processing_ticker)
         }).buffer_unordered(CONCURRENCY_FACTOR);
 
     let mut i: u64 = 0;

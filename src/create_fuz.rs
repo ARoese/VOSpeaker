@@ -23,7 +23,7 @@ async fn windows_paths<const LEN: usize>(paths: [&Path; LEN]) -> Result<[PathBuf
     #[cfg(target_family = "unix")]
     {
         let semaphore_ref = WINEPATH_SEMAPHORE.deref().clone();
-        let winepath_permit = semaphore_ref.acquire().await?;
+        let _winepath_permit = semaphore_ref.acquire().await?;
         let mut command = Command::new("winepath");
         let mut command = command.arg("-w").arg("-0");
 
@@ -33,7 +33,7 @@ async fn windows_paths<const LEN: usize>(paths: [&Path; LEN]) -> Result<[PathBuf
         let output = command.output().await?;
 
         if !output.status.success() {
-            return Err(format!("winepath failed. StdOut: {}", String::from_utf8_lossy(&output.stderr)).into());
+            return Err(format!("winepath failed. \n\tStdErr: {}", String::from_utf8_lossy(&output.stderr)).into());
         }
 
         let paths: [PathBuf;LEN] = output.stdout
@@ -241,14 +241,12 @@ pub async fn wav_to_fuz(wav_path: &WavPath, dialogue_text: &OsStr, fuz_destinati
     xwm_encode_result?;
     lip_encode_result?;
 
-    // don't need the resampled file
-    // TODO: join these futures for performance
-    tokio::fs::remove_file(&resampled_wav_path.deref()).await?;
-
     create_fuz(&xwm_path, &lip_path, fuz_destination_path).await?;
 
     // clean up intermediates
     if true {
+        // don't need the resampled file
+        tokio::fs::remove_file(&resampled_wav_path.deref()).await?;
         tokio::fs::remove_file(&lip_path).await?;
         tokio::fs::remove_file(&xwm_path).await?;
     }

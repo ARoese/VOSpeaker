@@ -31,7 +31,7 @@ pub fn init_generator(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, pro
     let chatterbox_config_disk = project_dir.load_chatterbox_config()
         .unwrap_or(ChatterboxGeneratorConfig{
             cfg_weight: 0.5,
-            endpoint: "localhost:9005".into(), // TODO: leave this default when done testing
+            endpoint: "localhost:9005".into(),
             exaggeration: 0.5,
             temperature: 0.5,
             voice_path: Default::default()
