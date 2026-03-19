@@ -1,35 +1,33 @@
 
-import { ComboBox, TextEdit, SpinBox } from "std-widgets.slint";
+import { ComboBox, TextEdit, SpinBox, ScrollView } from "std-widgets.slint";
 export struct Expansion {
+    index: int,
     name: string,
-    substitutions: [string]
+    substitutions: string
 }
 
 export global Mappings {
     pure callback expansionNames([Expansion]) -> [string];
-    // TODO: remove this
-    pure callback parseSubstitutions(string) -> [string];
-    pure callback collapseSubstitutions([string]) -> string;
-    callback expansion_changed(int, [string]);
+    callback expansion_changed(string, string);
     callback max_expansions_changed();
 }
 
 export component ExpansionEditor inherits VerticalLayout {
     in-out property <Expansion> expansion;
-    callback expansion_changed([string]);
+    callback expansion_changed(string);
 
     property <bool> update-pending: false;
     update-timer := Timer {
         interval: 10ms;
         running: update-pending;
         triggered => {
-            expansion_changed(Mappings.parseSubstitutions(te.text));
+            expansion_changed(te.text);
             update-pending = false;
         }
     }
 
     te := TextEdit {
-        text: Mappings.collapseSubstitutions(expansion.substitutions);
+        text: expansion.substitutions;
         placeholder-text: "Jack\nJohn\nJill";
         edited(text) => {
             update-pending = true;
@@ -61,11 +59,48 @@ export component ExpansionsEditor inherits VerticalLayout {
     }
 
     Rectangle {
-        for expansion[i] in expansions: Rectangle {
-            if i == cb.current-index || (i == 0 && cb.current-index == -1): ExpansionEditor {
+        if expansions.length > 0: Rectangle {
+            for expansion[i] in expansions: ExpansionEditor {
                 expansion: expansion;
-                expansion_changed(new_expansions) => {Mappings.expansion_changed(i, new_expansions)}
+                expansion_changed(new_expansions) => {Mappings.expansion_changed(cb.current-value, new_expansions)}
+                visible: i == cb.current-index || (cb.current-index < 0 && i == 0);
             }
+
+            /*
+            ScrollView {
+                VerticalLayout {
+                    for expansion[i] in expansions: VerticalLayout {
+                        Text {
+                            text: @tr("name: {}", expansion.name);
+                        }
+                        Text {
+                            text: @tr("expansions: {}", expansion.substitutions);
+                        }
+                    }
+                }
+            }
+            */
+            /*
+            VerticalLayout {
+                Text {
+                    text: cb.current-index;
+                }
+                Text {
+                    text: cb.current-value;
+                }
+                TextEdit {
+                    text: cb.current-value;
+                }
+
+                Text {
+                    text: expansions[(cb.current-index >= 0 ? cb.current-index : 0)].substitutions;
+                }
+                TextEdit {
+                    text: expansions[(cb.current-index >= 0 ? cb.current-index : 0)].substitutions;
+                }
+            }
+            */
+
         }
     }
 }

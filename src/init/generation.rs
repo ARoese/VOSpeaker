@@ -6,7 +6,7 @@ use crate::init::ProgressVal::{Determinate, Indeterminate};
 use crate::init::{ProgressHandle, ProgressState};
 use crate::models::{MassGenerationOptions, TopicModel};
 use crate::project_dir::topic_lines::SpokenTopicLine;
-use crate::{AppWindow, GenerationActions, UIError};
+use crate::{AppWindow, GenerationActions, TopicsModel, UIError};
 use async_compat::Compat;
 use slint::{spawn_local, ComponentHandle, JoinHandle, Model, Weak};
 use std::cell::RefCell;
@@ -20,32 +20,23 @@ use tokio_util::sync::CancellationToken;
 use crate::audio_conversion::{wav_to_mp3, WavPath};
 
 // TODO: make this result for error prop
-async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line_idx: i32) -> Result<(), UIError> {
+async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, topic_idx: i32, line_idx: i32) -> Result<(), UIError> {
     let ui = ui_weak.upgrade().unwrap();
     let config: ChatterboxGeneratorConfig = ui.get_genConfig()
         .try_into()
         .map_err(|()| raise("Chatterbox config is invalid"))?;
 
-    let temp = ui
-        .get_topicListModel()
+    let topic = topics_model
         .row_data(topic_idx as usize)
         .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", topic_idx)))?;
 
-    let topic = temp.dialog_lines.as_any().downcast_ref::<TopicModel>()
-        .expect("Topic model was not custom type");
-    
-    let mp3_path = topic.audio_path(line_idx as usize)
+    let line = topic.row_data(line_idx as usize)
         .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", topic_idx)))?;
 
-    // slightly naughty construction, but the model is casting from this anyways.
-    // TODO: this can be better done by holding and passing around an Rc to the underlying model, and using map models
-    let clean_line = SpokenTopicLine(
-        topic.row_data(line_idx as usize)
-            .ok_or(make_error(&format!("Dialogue line with idx '{}' does not exist", line_idx)))?
-            .clean_line.to_string()
-    );
-    //let target_path = topic.audio_path(line_idx as usize)?;
+    let mp3_path = line.audio_path;
 
+    let clean_line = line.spoken_topic_line;
+    //let target_path = topic.audio_path(line_idx as usize)?;
 
     let vo_hash = clean_line.vo_hash();
     let config_hash = config.config_hash();
@@ -70,14 +61,9 @@ async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topic_idx: i32, line
     Ok(())
 }
 
-async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, handle: &ProgressHandle, options: &MassGenerationOptions) -> Result<(), UIError> {
-    let ui = ui_weak.upgrade().expect("ui upgrade failed");
-
-    for (i, topic_item) in ui.get_topicListModel().iter().enumerate() {
-        let name = topic_item.topic_name.to_string();
-        let topic = topic_item.dialog_lines.as_any()
-            .downcast_ref::<TopicModel>()
-            .expect("Topic model was not custom type");
+async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, handle: &ProgressHandle, options: &MassGenerationOptions) -> Result<(), UIError> {
+    for (i, topic) in topics_model.iter().enumerate() {
+        let name = topic.get_topic_name().to_string();
 
         let num_to_generate = (0..topic.row_count())
             .map(|line_idx| topic.should_generate(line_idx, &options))
@@ -94,7 +80,7 @@ async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, handle: &Progr
                 progress: num_generated,
             })).expect("Progress sender failed prematurely");
 
-            generate_dialogue_future(ui_weak.clone(), i as i32, line_idx as i32)
+            generate_dialogue_future(ui_weak.clone(), topics_model.clone(), i as i32, line_idx as i32)
                 .await
                 .map_err(|e|
                     make_error(&format!("Error when generating dialogue line ({}, {}): {}", i, line_idx, e.message))
@@ -108,11 +94,11 @@ async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, handle: &Progr
     Ok(())
 }
 
-fn batch_generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, options: MassGenerationOptions) -> JoinHandle<()> {
+fn batch_generate_dialogue_action(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, handle: ProgressHandle, options: MassGenerationOptions) -> JoinHandle<()> {
     println!("batch generating dialogues");
 
     let future = Compat::new(async move {
-        let result = batch_generate_dialogue_future(ui_weak, &handle, &options)
+        let result = batch_generate_dialogue_future(ui_weak, topics_model, &handle, &options)
             .with_cancellation_token(&handle.cancellation)
             .await;
 
@@ -124,7 +110,7 @@ fn batch_generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHand
     spawn_local(future).expect("Spawning of local future failed")
 }
 
-fn generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, topic_idx: i32, line_idx: i32) -> JoinHandle<()> {
+fn generate_dialogue_action(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, handle: ProgressHandle, topic_idx: i32, line_idx: i32) -> JoinHandle<()> {
     // TODO: send errors
     println!("generation requested for {}:{}", topic_idx, line_idx);
 
@@ -134,7 +120,7 @@ fn generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, to
             Inflight(Indeterminate {status: "Generating dialogue".into()})
         ).ok();
 
-        let result = generate_dialogue_future(ui_weak, topic_idx, line_idx)
+        let result = generate_dialogue_future(ui_weak, topics_model, topic_idx, line_idx)
             .with_cancellation_token(&handle.cancellation).await;
 
         if let Some(Err(e)) = result {
@@ -148,15 +134,17 @@ fn generate_dialogue_action(ui_weak: Weak<AppWindow>, handle: ProgressHandle, to
     spawn_local(future).unwrap()
 }
 
-pub fn init_generation(ui: &AppWindow, error_sender: &mpsc::Sender<UIError>, progress_sender: &Sender<ProgressState>, cancellation_token: &Rc<RefCell<CancellationToken>>) {
+pub fn init_generation(ui: &AppWindow, topics_model: &Rc<TopicsModel>, error_sender: &mpsc::Sender<UIError>, progress_sender: &Sender<ProgressState>, cancellation_token: &Rc<RefCell<CancellationToken>>) {
     ui.global::<GenerationActions>().on_generate_dialogue({
         let ui_weak = ui.as_weak();
         let sender = progress_sender.clone();
+        let topics_model = topics_model.clone();
         let error_sender = error_sender.clone();
         let ct = cancellation_token.clone();
         move |topic_idx, line_idx| {
             generate_dialogue_action(
                 ui_weak.clone(),
+                topics_model.clone(),
                 ProgressHandle{ error_sender: error_sender.clone(), progress_sender: sender.clone(), cancellation: ct.borrow().clone() },
                 topic_idx, line_idx
             );
@@ -166,6 +154,7 @@ pub fn init_generation(ui: &AppWindow, error_sender: &mpsc::Sender<UIError>, pro
     ui.global::<GenerationActions>().on_mass_generate_dialogue({
         let ui_weak = ui.as_weak();
         let sender = progress_sender.clone();
+        let topics_model = topics_model.clone();
         let error_sender = error_sender.clone();
         let ct = cancellation_token.clone();
         move |regen_stale| {
@@ -185,6 +174,7 @@ pub fn init_generation(ui: &AppWindow, error_sender: &mpsc::Sender<UIError>, pro
 
                 batch_generate_dialogue_action(
                     ui_weak.clone(),
+                    topics_model.clone(),
                     ProgressHandle{
                         error_sender: error_sender.clone(),
                         progress_sender: sender.clone(),

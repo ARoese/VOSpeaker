@@ -3,12 +3,14 @@ import { GenerationActions } from "generator.slint";
 import { DialogueFilterOptions } from "filter.slint";
 
 export struct TopicDialogLine {
+    index: int,
     substituted_line: string,
     clean_line: string,
     can_play: bool
 }
 
 export struct TopicListItem {
+    index: int,
     topic_name: string,
     dialog_lines: [TopicDialogLine]
 }
@@ -18,7 +20,7 @@ export global Audio {
 }
 
 export global FilterActions {
-    pure callback filter_accepts(DialogueFilterOptions, TopicDialogLine) -> bool;
+    pure callback filtered(DialogueFilterOptions, [TopicDialogLine]) -> [TopicDialogLine];
 }
 
 component TopicListItemView inherits VerticalLayout {
@@ -98,15 +100,15 @@ component TopicListItemView inherits VerticalLayout {
         min-height: 0px;
         visible: expanded;
         vertical-stretch: expanded ? 1.0 : 0.0;
-        for dLine[i] in item.dialog_lines: VerticalLayout{
-            if FilterActions.filter_accepts(filter_options, dLine): HorizontalLayout {
+        for dLine[i] in FilterActions.filtered(filter_options, item.dialog_lines): VerticalLayout{
+            HorizontalLayout {
                 padding: 4px;
                 if dLine.can_play: Button {
                     colorize-icon: true;
                     icon: @image-url("assets/play.svg");
                     text: "play";
                     clicked => {
-                        root.play_audio(i);
+                        root.play_audio(dLine.index);
                     }
                 }
 
@@ -114,7 +116,7 @@ component TopicListItemView inherits VerticalLayout {
                     colorize-icon: true;
                     icon: @image-url("assets/audio-lines.svg");
                     text: "generate";
-                    clicked => {generate_audio(i)}
+                    clicked => {generate_audio(dLine.index)}
                 }
 
                 VerticalLayout {
@@ -136,7 +138,7 @@ component TopicListItemView inherits VerticalLayout {
                     colorize-icon: true;
                     icon: @image-url("assets/redo.svg");
                     text: "regenerate";
-                    clicked => {generate_audio(i)}
+                    clicked => {generate_audio(dLine.index)}
                 }
             }
         }
@@ -187,11 +189,11 @@ export component TopicList inherits VerticalLayout {
         }
         play_audio(line_no) => {
             //debug("playing dialogue");
-            Audio.play_dialog(expanded_index,line_no)
+            Audio.play_dialog(model[expanded_index].index, line_no)
         }
         generate_audio(line_no) => {
             //debug("generating");
-            GenerationActions.generate_dialogue(expanded_index, line_no)
+            GenerationActions.generate_dialogue(model[expanded_index].index, line_no)
         }
     }
 
@@ -208,7 +210,7 @@ export component TopicList inherits VerticalLayout {
                        expand_clicked => {
                            expanded_index = i
                        }
-                       delete_topic => {remove_topic(i)}
+                       delete_topic => {remove_topic(data.index)}
                     }
                 }
             }

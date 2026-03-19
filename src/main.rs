@@ -15,13 +15,13 @@ use crate::dialog_generator::{ConfigHashable, DialogGenerator};
 use crate::static_resources::init_resources_dir;
 use clap::Parser;
 use futures::StreamExt;
-use init::{get_expansion_config, get_substitutions, init_dialogue_audio, init_expansions, init_export, init_filters, init_generation, init_generator, init_receivers, init_substitutions, init_topics};
+use init::{init_dialogue_audio, init_export, init_generation, init_generator, init_receivers, init_topics};
 use project_dir::project_dir::ProjectDir;
 use rfd::MessageButtons;
 use serde::{Deserialize, Serialize};
-use slint::{quit_event_loop, Model, ModelRc, StandardListViewItem, ToSharedString, VecModel};
+use slint::{quit_event_loop, MapModel, Model, ModelRc, StandardListViewItem, ToSharedString, VecModel};
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Display;
 use std::fs;
@@ -29,10 +29,13 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tokio_util::future::FutureExt;
-use crate::init::{init_batch_tools, ProgressHandleSpawner};
+use crate::init::{init_batch_tools, init_filters, ProgressHandleSpawner};
+use crate::models::{IndexedModel, TopicLine, TopicModel};
+use crate::project_dir::topic_lines::TopicExpansionConfig;
 
 slint::include_modules!();
 
+type TopicsModel = VecModel<Rc<TopicModel>>;
 fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     let ui = AppWindow::new()?;
 
@@ -46,24 +49,48 @@ fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
         cancellation: cancellation_token.clone()
     };
 
-    let topics_model = init_topics(&ui, &project_dir, &error_sender);
-    let topics_modelrc = ModelRc::new(topics_model.clone());
+    let expand_config = Rc::new(RefCell::new(TopicExpansionConfig::default()));
+    let substitutions = Rc::new(RefCell::new(HashMap::default()));
+    let topics_model: Rc<TopicsModel> = init_topics(&ui, &project_dir, &expand_config, &substitutions, &error_sender);
 
-    init_generator(&ui, &topics_modelrc, &project_dir);
+    let sorted_topics = IndexedModel::new(topics_model.clone().into())
+        .sort_by(|lhs, rhs|
+            lhs.data.get_topic_name().to_lowercase().cmp(&rhs.data.get_topic_name().to_lowercase())
+        );
 
-    init_expansions(&ui, &topics_modelrc, &project_dir);
-    init_substitutions(&ui, &project_dir);
+    let ui_topics = sorted_topics.map(|e| {
+        let topic_name = e.get_topic_name().to_shared_string();
+        let topic_lines = IndexedModel::new(ModelRc::from(e.data))
+            .map(|line| {
+                TopicDialogLine {
+                    can_play: line.audio_path.exists(),
+                    clean_line: line.spoken_topic_line.0.clone().into(),
+                    index: line.idx as i32,
+                    substituted_line: line.substituted_line.0.clone().into(),
+                }
+            });
 
-    init_generation(&ui, &error_sender, &progress_sender, &cancellation_token);
-    init_dialogue_audio(&ui);
-    init_filters(&ui, &topics_modelrc);
+        TopicListItem {
+            dialog_lines: ModelRc::new(topic_lines),
+            topic_name: topic_name,
+            index: e.idx as i32,
+        }
+    });
+    let ui_topics = ModelRc::new(ui_topics);
+
+    ui.set_topicListModel(ui_topics);
+    init_generator(&ui, &project_dir);
+
+    init_generation(&ui, &topics_model, &error_sender, &progress_sender, &cancellation_token);
+    init_dialogue_audio(&ui, &topics_model);
+    init_filters(&ui);
 
     let packed_dialogs = init_export(&ui, &topics_model, &project_dir, &progress_sender, &error_sender, &cancellation_token)?;
-    init_batch_tools(&ui, &topics_modelrc, phs.clone())?;
+    init_batch_tools(&ui, &topics_model, phs.clone())?;
     ui.run()?;
 
     // save configs
-    project_dir.save_expansion_config(get_expansion_config(&ui))?;
+    project_dir.save_expansion_config(expand_config.borrow().clone())?;
 
     if let Some(chatterbox_config) = ui.get_genConfig().try_into().ok() {
         project_dir.save_chatterbox_config(chatterbox_config)?;
@@ -71,7 +98,7 @@ fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
         eprintln!("Failed to parse chatterbox config, so cannot save it");
     }
 
-    project_dir.save_substitutions(get_substitutions(&ui))?;
+    project_dir.save_substitutions(substitutions.borrow().clone())?;
 
     Ok(())
 }

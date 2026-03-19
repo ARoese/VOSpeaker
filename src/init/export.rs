@@ -9,7 +9,7 @@ use crate::models::TopicModel;
 use crate::project_dir::hashes::VOHash;
 use crate::project_dir::project_dir::{FomodPaths, ProjectDir};
 use crate::project_dir::topic_lines::SpokenTopicLine;
-use crate::{AppWindow, DBVOExportDialogue, DBVOExportOptions, Dialogs, FOMODExportDialogue, FOMODExportOptions, FolderExportDialogue, FolderExportOptions, FolderNamingPolicy, PathSelection, TopicListItem, UIError};
+use crate::{AppWindow, DBVOExportDialogue, DBVOExportOptions, Dialogs, FOMODExportDialogue, FOMODExportOptions, FolderExportDialogue, FolderExportOptions, FolderNamingPolicy, PathSelection, TopicListItem, TopicsModel, UIError};
 use async_compat::Compat;
 use futures::{stream, StreamExt};
 use lazy_regex::regex;
@@ -53,7 +53,7 @@ fn format_as_file(name: String) -> String {
     name.to_string()
 }
 
-async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options: &FolderExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+async fn do_export_to_folder(topics_model: &Rc<TopicsModel>, options: &FolderExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
     let export_folder = rfd::FileDialog::new()
         .set_title("Select Export Folder")
         .pick_folder();
@@ -68,15 +68,10 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
     }
 
     for topic in topics_model.iter() {
-        let topic_model = topic.dialog_lines
-            .as_any()
-            .downcast_ref::<TopicModel>()
-            .expect("Topic model was not of custom type");
-
-        let num_dialogues = topic_model.row_count();
+        let num_dialogues = topics_model.row_count();
         let changed_err = make_error("Model changed when exporting.");
         let export_file_root = if options.group_by_topic {
-            let sub_folder = export_folder.join(&topic.topic_name);
+            let sub_folder = export_folder.join(&topic.get_topic_name());
             if options.topic_suffix {
                 sub_folder.with_extension("topic.d")
             }else{
@@ -90,17 +85,17 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
             .map_err(|e| make_error(&format!("Failed to create topic subdir '{}': {e:?}", export_file_root.to_string_lossy())))?;
 
         for i in 0..num_dialogues {
-            let src = topic_model.audio_path(i).ok_or(changed_err.clone())?;
+            let src = topic.audio_path(i).ok_or(changed_err.clone())?;
             if !src.exists() {
                 continue;
             }
 
-            let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
-            let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
-            let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
+            let data = topic.row_data(i).ok_or(changed_err.clone())?;
+            let hash = SpokenTopicLine(data.spoken_topic_line.to_string()).vo_hash();
+            let expanded = data.substituted_line;
             let file_name = match options.naming_policy {
-                FolderNamingPolicy::ExactSpokenDialogue => { data.clean_line.to_string() }
-                FolderNamingPolicy::FormattedSpokenDialogue => { format_as_file(data.clean_line.to_string()) }
+                FolderNamingPolicy::ExactSpokenDialogue => { data.spoken_topic_line.to_string() }
+                FolderNamingPolicy::FormattedSpokenDialogue => { format_as_file(data.spoken_topic_line.to_string()) }
                 FolderNamingPolicy::ExactExpandedDialogue => { expanded.0.clone() }
                 FolderNamingPolicy::FormattedExpandedDialogue => { format_as_file(expanded.0.clone()) }
                 FolderNamingPolicy::MD5Hash => { hash.to_string() }
@@ -109,7 +104,7 @@ async fn do_export_to_folder(topics_model: &Rc<VecModel<TopicListItem>>, options
             let dest = export_file_root.join(&file_name).with_added_extension("mp3");
             // report progress
             let progress = Inflight(Determinate {
-                status: format!("Exporting '{}'", topic.topic_name),
+                status: format!("Exporting '{}'", topic.get_topic_name()),
                 range: 0..num_dialogues as u64,
                 progress: i as u64,
             });
@@ -186,13 +181,14 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
         return Ok(());
     }
 
-    let data = topic_model.row_data(i).ok_or(changed_err.clone())?;
-    let hash = SpokenTopicLine(data.clean_line.to_string()).vo_hash();
+    let line = topic_model.row_data(i).ok_or(changed_err.clone())?;
+
+    let hash = line.spoken_topic_line.vo_hash();
     let Some(_processing_ticket) = processing_ticker.declare(hash) else {
         return Ok(());
     };
-    // mark this hash as being processed
-    let expanded = topic_model.line(i).ok_or(changed_err.clone())?;
+
+    let expanded = line.substituted_line;
     let file_name = format_as_file(expanded.0.clone());
     let cache_dest = src.with_extension("fuz");
     let final_dest = audio_dir.join(&file_name).with_added_extension("fuz");
@@ -245,7 +241,7 @@ async fn make_dbvo_dirs(export_folder: &Path, options: &DBVOExportOptions, topic
     Ok(audio_dir)
 }
 
-async fn export_to_dbvo_action(topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+async fn export_to_dbvo_action(topics_model: &TopicsModel, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
     if options.voice_pack_name.is_empty() || options.voice_pack_id.is_empty() {
         return Err(make_error("Exporting with an empty voice pack name or voice pack id makes no sense. These values are important for loading the DBVO!"));
     }
@@ -274,29 +270,24 @@ async fn export_to_dbvo_action(topics_model: &Rc<VecModel<TopicListItem>>, optio
     do_export_to_dbvo(&export_folder, topics_model, options, progress_sender).await
 }
 
-async fn export_topic_to_dbvo(topic: &TopicListItem, export_folder: &Path, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
-    let topic_model = topic.dialog_lines
-        .as_any()
-        .downcast_ref::<TopicModel>()
-        .expect("Topic model was not of custom type");
-
-    let num_dialogues = topic_model.row_count();
+async fn export_topic_to_dbvo(topic: &TopicModel, export_folder: &Path, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+    let num_dialogues = topic.row_count();
 
     let progress = Inflight(Determinate {
-        status: format!("Preparing to export '{}'", topic.topic_name),
+        status: format!("Preparing to export '{}'", topic.get_topic_name()),
         range: 0..num_dialogues as u64,
         progress: 0,
     });
 
     progress_sender.send(progress).expect("failed to send progress");
 
-    let fuz_dir = make_dbvo_dirs(&export_folder, &options, &topic.topic_name).await?;
+    let fuz_dir = make_dbvo_dirs(&export_folder, &options, &topic.get_topic_name()).await?;
 
     const CONCURRENCY_FACTOR: usize = 32;
     let processing_ticker = ProcessingTicker::<VOHash>::new();
     let mut processing_stream = stream::iter(0..num_dialogues)
         .map(|i| {
-            process_export_fuz(i, &topic_model, &fuz_dir, &processing_ticker)
+            process_export_fuz(i, &topic, &fuz_dir, &processing_ticker)
         }).buffer_unordered(CONCURRENCY_FACTOR);
 
     let mut i: u64 = 0;
@@ -304,7 +295,7 @@ async fn export_topic_to_dbvo(topic: &TopicListItem, export_folder: &Path, optio
         result?;
         // report progress
         let progress = Inflight(Determinate {
-            status: format!("Exporting '{}'", topic.topic_name),
+            status: format!("Exporting '{}'", topic.get_topic_name()),
             range: 0..num_dialogues as u64,
             progress: i,
         });
@@ -315,7 +306,7 @@ async fn export_topic_to_dbvo(topic: &TopicListItem, export_folder: &Path, optio
     Ok(())
 }
 
-async fn do_export_to_dbvo(export_folder: &Path, topics_model: &Rc<VecModel<TopicListItem>>, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+async fn do_export_to_dbvo(export_folder: &Path, topics_model: &TopicsModel, options: &DBVOExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
     for topic in topics_model.iter() {
         export_topic_to_dbvo(&topic, export_folder, options, progress_sender).await?
     }
@@ -364,7 +355,7 @@ fn get_mod_name(string: &str) -> Option<(String, String)> {
     ))
 }
 
-async fn do_export_to_fomod(topics_model: &Rc<VecModel<TopicListItem>>, options: &FOMODExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
+async fn do_export_to_fomod(topics_model: &TopicsModel, options: &FOMODExportOptions, progress_sender: &ProgressSender) -> Result<(), UIError> {
     if options.reference_path.is_empty() || options.output_path.is_empty() {
         return Err(make_error("Reference FOMOD or output path was empty"));
     }
@@ -389,7 +380,7 @@ async fn do_export_to_fomod(topics_model: &Rc<VecModel<TopicListItem>>, options:
 
             let dest_mod_dir = dest_group_dir.join(format!("{} - {}", options.voice_pack_name.to_string().replace(" ", ""), mod_name));
 
-            let topic_item = topics_model.iter().find(|e| e.topic_name.to_string() == mod_name);
+            let topic_item = topics_model.iter().find(|e| e.get_topic_name() == mod_name);
             let Some(topic_item) = topic_item else {continue};
             let dbvo_options = DBVOExportOptions {
                 separate_topics: false,
@@ -418,7 +409,7 @@ async fn do_export_to_fomod(topics_model: &Rc<VecModel<TopicListItem>>, options:
 
 pub fn init_export(
     ui: &AppWindow,
-    topics_model: &Rc<VecModel<TopicListItem>>,
+    topics_model: &Rc<TopicsModel>,
     project_dir: &Rc<ProjectDir>,
     progress_sender: &ProgressSender,
     error_sender: &ErrorSender,

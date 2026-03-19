@@ -1,6 +1,6 @@
 use crate::chatterbox_generator::ChatterboxGeneratorConfig;
 use crate::project_dir::project_dir::ProjectDir;
-use crate::{AppWindow, FilePicking, TopicListItem};
+use crate::{AppWindow, FilePicking, TopicListItem, TopicsModel};
 use slint::{ComponentHandle, ModelRc, SharedString};
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -24,8 +24,7 @@ fn format_path(p: SharedString) -> SharedString {
         .into()
 }
 
-pub fn init_generator(ui: &AppWindow, topics_model: &ModelRc<TopicListItem>, project_dir: &ProjectDir) {
-    ui.set_topicListModel(topics_model.clone());
+pub fn init_generator(ui: &AppWindow, project_dir: &ProjectDir) {
     ui.global::<FilePicking>().on_pick_wav_file(pick_wav_file);
     ui.global::<FilePicking>().on_format_path(format_path);
     let chatterbox_config_disk = project_dir.load_chatterbox_config()

@@ -167,7 +167,7 @@ impl RawTopicLine {
             .into_iter()
             // limit expansions, but always take at least 1
             .take(max(1, config.max_expansions))
-            .map(|s| SubstitutedTopicLine(s, self.0.clone()))
+            .map(|s| SubstitutedTopicLine(s, RawTopicLine(self.0.clone())))
             .collect()
     }
 }
@@ -238,9 +238,8 @@ impl Sentence {
 }
 
 #[derive(Debug, Clone)]
-pub struct SubstitutedTopicLine(pub String, ExplodedRawLine);
+pub struct SubstitutedTopicLine(pub String, pub RawTopicLine);
 impl SubstitutedTopicLine {
-
     fn perform_substitutions(original: &String, substitutions: HashMap<String, String>) -> String {
         let lower_substitutions = substitutions.iter().map(|(k,v)| (k.to_lowercase(), v)).collect::<HashMap<_,_>>();
         let sentence = Sentence::from_string(original);

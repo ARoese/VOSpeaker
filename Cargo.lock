@@ -16,6 +16,7 @@ dependencies = [
  "log",
  "maplit",
  "md5",
+ "rayon",
  "rfd",
  "rodio",
  "serde",

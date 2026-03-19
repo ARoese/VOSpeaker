@@ -1,20 +1,19 @@
+use std::cell::RefCell;
 use crate::init::errors::make_error;
-use crate::init::expansions::handle_expansion_change;
-use crate::init::substitutions::handle_substitution_change;
-use crate::models::TopicModel;
+use crate::models::{TopicModel};
 use crate::project_dir::project_dir::ProjectDir;
 use crate::project_dir::topic_dir::TopicDir;
 use crate::project_dir::topic_lines::TopicExpansionConfig;
 use crate::{AppWindow, TopicListItem, UIError};
-use slint::{spawn_local, ComponentHandle, Model, ModelRc, VecModel, Weak};
+use slint::{spawn_local, ComponentHandle, Model, ModelExt, ModelRc, SortModel, VecModel, Weak};
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::rc::Rc;
 use tokio::sync::mpsc;
-use crate::init::ErrorSender;
+use crate::init::{init_expansions, init_substitutions, ErrorSender, ExpansionsConfigModel};
 
-pub fn add_topic_files(ui_weak: &Weak<AppWindow>, project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<TopicListItem>>, error_sender: &ErrorSender, topic_files: &Vec<PathBuf>) {
+pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>,  error_sender: &ErrorSender, topic_files: &Vec<PathBuf>) {
     for path in topic_files {
         let topics_dir = project_dir.topics_path();
         let topic_prefix = path.file_prefix().expect("It shouldn't be possible to pick an empty path").to_string_lossy().to_string();
@@ -23,33 +22,22 @@ pub fn add_topic_files(ui_weak: &Weak<AppWindow>, project_dir: &Rc<ProjectDir>, 
         );
         
         // update if a topic with the same name exists
-        if let Some(existing_topic) = topics_model.iter().find(|topic| topic.topic_name.to_string() == topic_prefix) {
-            if let Err(e) = existing_topic.dialog_lines
-                .as_any()
-                .downcast_ref::<TopicModel>()
-                .expect("Topic model of custom type")
-                .update_topic_file(&path) {
-
+        if let Some(existing_topic) = topics_model.iter().find(|topic| topic.get_topic_name().to_string() == topic_prefix) {
+            if let Err(e) = existing_topic.update_topic_file(&path) {
+                let name = existing_topic.get_topic_name();
                 // blocking here is not perfect, but it's fine for now
                 tokio::task::spawn_blocking({
                     let error_sender = error_sender.clone();
                     async move || {
-                        error_sender.send(make_error(&format!("Error updating topic '{}': {e:?}", existing_topic.topic_name))).await.ok();
+                        error_sender.send(make_error(&format!("Error updating topic '{}': {e:?}", name))).await.ok();
                     }
                 });
             }
         } else { // make a new one if the topic doesn't exist
             match TopicDir::create_new(&new_topic_dir, &path) {
                 Ok(new_dir) => {
-                    // TODO: extract substitution and expansion state to a pair of Rc<RefCell> that get shared by all these models
-                    // TODO: as it is now, each topic has its own model. They should get notified that there is a new version available
-                    // TODO: That way, this thing can just pass in clones of the Rc instead of lying that it changed so it gets re-fetched
-                    let expansion_config = handle_expansion_change(ui_weak.clone());
-                    let substitutions = handle_substitution_change(ui_weak.clone());
-                    topics_model.push(TopicListItem{
-                        topic_name: new_dir.name().into(),
-                        dialog_lines: ModelRc::new(TopicModel::new(new_dir, substitutions, expansion_config)),
-                    });
+                    let new_topic_file = Rc::new(TopicModel::new(new_dir, substitutions.clone(), expansions.clone()));
+                    topics_model.push(new_topic_file);
                 }
                 Err(e) => {
                     spawn_local({
@@ -67,26 +55,21 @@ pub fn add_topic_files(ui_weak: &Weak<AppWindow>, project_dir: &Rc<ProjectDir>, 
     }
 }
 
-pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &mpsc::Sender<UIError>) -> Rc<VecModel<TopicListItem>> {
-    let expand_config = Rc::new(TopicExpansionConfig::default());
-    let substitutions = Rc::new(HashMap::<String, String>::default());
-
-    let mut topic_dirs = project_dir.get_topic_dirs().expect("failed to load project topic dirs")
-        .into_iter().map(|topic_dir|
-        TopicListItem{
-            topic_name: topic_dir.name().into(),
-            dialog_lines: ModelRc::new(TopicModel::new(topic_dir, (*substitutions).clone(), (*expand_config).clone())),
+pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: &Rc<RefCell<TopicExpansionConfig>>, substitutions: &Rc<RefCell<HashMap<String, String>>>, error_sender: &mpsc::Sender<UIError>) -> Rc<VecModel<Rc<TopicModel>>> {
+    let topic_dirs = project_dir.get_topic_dirs().expect("failed to load project topic dirs")
+        .into_iter()
+        .map(|topic_dir| {
+            Rc::new(TopicModel::new(topic_dir, substitutions.clone(), expand_config.clone()))
         }
     ).collect::<Vec<_>>();
-    topic_dirs.sort_by(|a,b| a.topic_name.cmp(&b.topic_name));
-    let topics_model = Rc::from(VecModel::from(topic_dirs));
-
+    let topics_model = Rc::new(VecModel::from(topic_dirs));
 
     ui.on_add_topic_from_path({
         let error_sender = error_sender.clone();
-        let ui_weak = ui.as_weak();
         let project_dir = project_dir.clone();
         let topics_model = topics_model.clone();
+        let expand_config = expand_config.clone();
+        let substitutions = substitutions.clone();
         move || {
             let mut dialog = rfd::FileDialog::new();
             dialog = dialog.set_title("Select topic file(s)")
@@ -95,7 +78,7 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &
                 .add_filter("All Files (*)", &["*"]);
 
             if let Some(files) = dialog.pick_files() {
-                add_topic_files(&ui_weak, &project_dir, &topics_model, &error_sender, &files);
+                add_topic_files(&project_dir, &topics_model, expand_config.clone(), substitutions.clone(),  &error_sender, &files);
             }
         }
     });
@@ -105,8 +88,7 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &
         let topics_model = topics_model.clone();
         move |idx| {
             let removed_model = topics_model.remove(idx as usize);
-            let model = removed_model.dialog_lines.as_any().downcast_ref::<TopicModel>().unwrap();
-            if let Some(topic_dir) = Option::take(model.topic_dir.borrow_mut().deref_mut()) {
+            if let Some(topic_dir) = Option::take(removed_model.topic_dir.borrow_mut().deref_mut()) {
                 if let Err(e) = topic_dir.delete() {
                     spawn_local({
                         let error_sender = error_sender.clone();
@@ -121,6 +103,9 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, error_sender: &
             }
         }
     });
+
+    let expansions_config_model = init_expansions(ui, &topics_model, project_dir, expand_config.clone());
+    init_substitutions(ui, &topics_model, project_dir, substitutions.clone());
 
     topics_model
 }
