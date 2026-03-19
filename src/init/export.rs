@@ -411,18 +411,11 @@ pub fn init_export(
     ui: &AppWindow,
     topics_model: &Rc<TopicsModel>,
     project_dir: &Rc<ProjectDir>,
-    progress_sender: &ProgressSender,
-    error_sender: &ErrorSender,
-    cancellation_token: &Rc<RefCell<CancellationToken>>
+    phs: &ProgressHandleSpawner
 ) -> Result<PackedDialogues, Box<dyn Error>> {
     let export_to_folder = FolderExportDialogue::new()?;
     let export_to_dbvo = DBVOExportDialogue::new()?;
     let export_to_fomod = FOMODExportDialogue::new()?;
-    let progress_handle_spawner = ProgressHandleSpawner {
-        progress_sender: progress_sender.clone(),
-        error_sender: error_sender.clone(),
-        cancellation: cancellation_token.clone(),
-    };
 
     ui.global::<PathSelection>().on_select_folder_path(select_folder_path);
     export_to_fomod.global::<PathSelection>().on_select_folder_path(select_folder_path);
@@ -481,15 +474,13 @@ pub fn init_export(
 
     export_to_folder.on_do_export({
         let export_weak = export_to_folder.as_weak();
-        let ui_weak = ui.as_weak();
         let topics_model_weak = Rc::downgrade(&topics_model);
-        let progress_handle_spawner = progress_handle_spawner.clone();
+        let phs = phs.clone();
         move |options| {
             // TODO: panic less here
             let export_to_folder = export_weak.upgrade().expect("failed to upgrade ui");
             let topics_model = topics_model_weak.upgrade().expect("failed to upgrade topics model");
-            let ui = ui_weak.upgrade().expect("failed to upgrade ui");
-            let progress_handle = progress_handle_spawner.spawn();
+            let progress_handle = phs.spawn();
 
             let future = Compat::new(async move {
                 let result = do_export_to_folder(&topics_model, &options, &progress_handle.progress_sender)
@@ -507,16 +498,14 @@ pub fn init_export(
 
     export_to_dbvo.on_do_export({
         let export_weak = export_to_dbvo.as_weak();
-        let ui_weak = ui.as_weak();
         let topics_model_weak = Rc::downgrade(&topics_model);
-        let progress_handle_spawner = progress_handle_spawner.clone();
+        let phs = phs.clone();
         let project_dir = project_dir.clone();
         move |options| {
             // TODO: panic less here
             let export_to_dbvo = export_weak.upgrade().expect("failed to upgrade ui");
             let topics_model = topics_model_weak.upgrade().expect("failed to upgrade topics model");
-            let ui = ui_weak.upgrade().expect("failed to upgrade ui");
-            let progress_handle = progress_handle_spawner.spawn();
+            let progress_handle = phs.spawn();
             project_dir.save_last_dbvo_manifest(DBVOManifest{
                 voice_pack_name: options.voice_pack_name.to_string(),
                 voice_pack_id: options.voice_pack_id.to_string()
@@ -539,16 +528,14 @@ pub fn init_export(
 
     export_to_fomod.on_do_export({
         let export_weak = export_to_fomod.as_weak();
-        let ui_weak = ui.as_weak();
         let topics_model_weak = Rc::downgrade(&topics_model);
-        let progress_handle_spawner = progress_handle_spawner.clone();
+        let phs = phs.clone();
         let project_dir = project_dir.clone();
         move |options| {
             // TODO: panic less here
             let export_to_fomod = export_weak.upgrade().expect("failed to upgrade ui");
             let topics_model = topics_model_weak.upgrade().expect("failed to upgrade topics model");
-            let ui = ui_weak.upgrade().expect("failed to upgrade ui");
-            let progress_handle = progress_handle_spawner.spawn();
+            let progress_handle = phs.spawn();
             project_dir.save_last_fomod_paths(FomodPaths {
                 src: options.reference_path.to_string().into(),
                 dest: options.output_path.to_string().into(),

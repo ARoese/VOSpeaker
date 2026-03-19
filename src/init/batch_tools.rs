@@ -53,9 +53,10 @@ async fn delete_short_voicelines_action(topics: &Rc<TopicsModel>, progress_handl
     Ok(())
 }
 
-pub fn init_batch_tools(ui: &AppWindow, topics: &Rc<TopicsModel>, phs: ProgressHandleSpawner) -> Result<(), Box<dyn Error>> {
+pub fn init_batch_tools(ui: &AppWindow, topics: &Rc<TopicsModel>, phs: &ProgressHandleSpawner) -> Result<(), Box<dyn Error>> {
     ui.global::<Dialogs>().on_delete_short_voicelines({
         let topics = topics.clone();
+        let phs = phs.clone();
         move || {
             let handle = phs.spawn();
             let topics = topics.clone();

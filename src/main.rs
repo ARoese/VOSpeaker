@@ -44,49 +44,23 @@ fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     let (error_sender, progress_sender, cancellation_token) = init_receivers(&ui);
 
     let phs = ProgressHandleSpawner {
-        progress_sender: progress_sender.clone(),
+        progress_sender: progress_sender,
         error_sender: error_sender.clone(),
-        cancellation: cancellation_token.clone()
+        cancellation: cancellation_token
     };
 
     let expand_config = Rc::new(RefCell::new(TopicExpansionConfig::default()));
     let substitutions = Rc::new(RefCell::new(HashMap::default()));
     let topics_model: Rc<TopicsModel> = init_topics(&ui, &project_dir, &expand_config, &substitutions, &error_sender);
-
-    let sorted_topics = IndexedModel::new(topics_model.clone().into())
-        .sort_by(|lhs, rhs|
-            lhs.data.get_topic_name().to_lowercase().cmp(&rhs.data.get_topic_name().to_lowercase())
-        );
-
-    let ui_topics = sorted_topics.map(|e| {
-        let topic_name = e.get_topic_name().to_shared_string();
-        let topic_lines = IndexedModel::new(ModelRc::from(e.data))
-            .map(|line| {
-                TopicDialogLine {
-                    can_play: line.audio_path.exists(),
-                    clean_line: line.spoken_topic_line.0.clone().into(),
-                    index: line.idx as i32,
-                    substituted_line: line.substituted_line.0.clone().into(),
-                }
-            });
-
-        TopicListItem {
-            dialog_lines: ModelRc::new(topic_lines),
-            topic_name: topic_name,
-            index: e.idx as i32,
-        }
-    });
-    let ui_topics = ModelRc::new(ui_topics);
-
-    ui.set_topicListModel(ui_topics);
+    
     init_generator(&ui, &project_dir);
 
-    init_generation(&ui, &topics_model, &error_sender, &progress_sender, &cancellation_token);
+    init_generation(&ui, &topics_model, &phs);
     init_dialogue_audio(&ui, &topics_model);
     init_filters(&ui);
 
-    let packed_dialogs = init_export(&ui, &topics_model, &project_dir, &progress_sender, &error_sender, &cancellation_token)?;
-    init_batch_tools(&ui, &topics_model, phs.clone())?;
+    let packed_dialogs = init_export(&ui, &topics_model, &project_dir, &phs)?;
+    init_batch_tools(&ui, &topics_model, &phs)?;
     ui.run()?;
 
     // save configs

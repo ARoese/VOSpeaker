@@ -3,7 +3,7 @@ use crate::dialog_generator::{ConfigHashable, DialogGenerator};
 use crate::init::errors::{make_error, raise};
 use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::{Determinate, Indeterminate};
-use crate::init::{ProgressHandle, ProgressState};
+use crate::init::{ProgressHandle, ProgressHandleSpawner, ProgressState};
 use crate::models::{MassGenerationOptions, TopicModel};
 use crate::project_dir::topic_lines::SpokenTopicLine;
 use crate::{AppWindow, GenerationActions, TopicsModel, UIError};
@@ -134,18 +134,17 @@ fn generate_dialogue_action(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsMod
     spawn_local(future).unwrap()
 }
 
-pub fn init_generation(ui: &AppWindow, topics_model: &Rc<TopicsModel>, error_sender: &mpsc::Sender<UIError>, progress_sender: &Sender<ProgressState>, cancellation_token: &Rc<RefCell<CancellationToken>>) {
+pub fn init_generation(ui: &AppWindow, topics_model: &Rc<TopicsModel>, phs: &ProgressHandleSpawner) {
     ui.global::<GenerationActions>().on_generate_dialogue({
         let ui_weak = ui.as_weak();
-        let sender = progress_sender.clone();
         let topics_model = topics_model.clone();
-        let error_sender = error_sender.clone();
-        let ct = cancellation_token.clone();
+        let phs = phs.clone();
         move |topic_idx, line_idx| {
+            let ph = phs.spawn();
             generate_dialogue_action(
                 ui_weak.clone(),
                 topics_model.clone(),
-                ProgressHandle{ error_sender: error_sender.clone(), progress_sender: sender.clone(), cancellation: ct.borrow().clone() },
+                ph,
                 topic_idx, line_idx
             );
         }
@@ -153,10 +152,8 @@ pub fn init_generation(ui: &AppWindow, topics_model: &Rc<TopicsModel>, error_sen
 
     ui.global::<GenerationActions>().on_mass_generate_dialogue({
         let ui_weak = ui.as_weak();
-        let sender = progress_sender.clone();
         let topics_model = topics_model.clone();
-        let error_sender = error_sender.clone();
-        let ct = cancellation_token.clone();
+        let phs = phs.clone();
         move |regen_stale| {
             let current_config: Option<ChatterboxGeneratorConfig> = ui_weak
                 .upgrade()
@@ -171,14 +168,12 @@ pub fn init_generation(ui: &AppWindow, topics_model: &Rc<TopicsModel>, error_sen
                         None
                     }
                 };
-
+                
+                let ph = phs.spawn();
                 batch_generate_dialogue_action(
                     ui_weak.clone(),
                     topics_model.clone(),
-                    ProgressHandle{
-                        error_sender: error_sender.clone(),
-                        progress_sender: sender.clone(),
-                        cancellation: ct.borrow().clone() },
+                    ph,
                     options,
                 );
             }

@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use crate::init::errors::make_error;
-use crate::models::{TopicModel};
+use crate::models::{IndexedModel, TopicModel};
 use crate::project_dir::project_dir::ProjectDir;
 use crate::project_dir::topic_dir::TopicDir;
 use crate::project_dir::topic_lines::TopicExpansionConfig;
-use crate::{AppWindow, TopicListItem, UIError};
-use slint::{spawn_local, ComponentHandle, Model, ModelExt, ModelRc, SortModel, VecModel, Weak};
+use crate::{AppWindow, TopicDialogLine, TopicListItem, UIError};
+use slint::{spawn_local, ComponentHandle, Model, ModelExt, ModelRc, SortModel, ToSharedString, VecModel, Weak};
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::path::PathBuf;
@@ -25,13 +25,12 @@ pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<
         if let Some(existing_topic) = topics_model.iter().find(|topic| topic.get_topic_name().to_string() == topic_prefix) {
             if let Err(e) = existing_topic.update_topic_file(&path) {
                 let name = existing_topic.get_topic_name();
-                // blocking here is not perfect, but it's fine for now
-                tokio::task::spawn_blocking({
+                spawn_local({
                     let error_sender = error_sender.clone();
-                    async move || {
+                    async move {
                         error_sender.send(make_error(&format!("Error updating topic '{}': {e:?}", name))).await.ok();
                     }
-                });
+                }).expect("failed to spawn async local");
             }
         } else { // make a new one if the topic doesn't exist
             match TopicDir::create_new(&new_topic_dir, &path) {
@@ -107,5 +106,32 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
     let expansions_config_model = init_expansions(ui, &topics_model, project_dir, expand_config.clone());
     init_substitutions(ui, &topics_model, project_dir, substitutions.clone());
 
+    let sorted_topics = IndexedModel::new(topics_model.clone().into())
+        .sort_by(|lhs, rhs|
+            lhs.data.get_topic_name().to_lowercase().cmp(&rhs.data.get_topic_name().to_lowercase())
+        );
+
+    let ui_topics = sorted_topics.map(|e| {
+        let topic_name = e.get_topic_name().to_shared_string();
+        let topic_lines = IndexedModel::new(ModelRc::from(e.data))
+            .map(|line| {
+                TopicDialogLine {
+                    can_play: line.audio_path.exists(),
+                    clean_line: line.spoken_topic_line.0.clone().into(),
+                    index: line.idx as i32,
+                    substituted_line: line.substituted_line.0.clone().into(),
+                }
+            });
+
+        TopicListItem {
+            dialog_lines: ModelRc::new(topic_lines),
+            topic_name: topic_name,
+            index: e.idx as i32,
+        }
+    });
+    let ui_topics = ModelRc::new(ui_topics);
+
+    ui.set_topicListModel(ui_topics);
+    
     topics_model
 }
