@@ -1,8 +1,10 @@
-use rayon::iter::ParallelIterator;
+use crate::audio_conversion::Mp3Path;
 use crate::project_dir::hashes::ConfigHash;
 use crate::project_dir::topic_dir::TopicDir;
 use crate::project_dir::topic_lines::{RawTopicLine, SpokenTopicLine, SubstitutedTopicLine, TopicExpansionConfig};
-use crate::TopicDialogLine;
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
+use rayon::slice::ParallelSliceMut;
 use slint::{Model, ModelNotify, ModelRc, ModelTracker};
 use std::any::Any;
 use std::cell::RefCell;
@@ -11,9 +13,6 @@ use std::io::Error;
 use std::ops::Deref;
 use std::path::Path;
 use std::rc::Rc;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::slice::ParallelSliceMut;
-use crate::audio_conversion::Mp3Path;
 
 type SubstitutionsMap = HashMap<String, String>;
 
@@ -115,50 +114,24 @@ impl TopicModel {
         Ok(())
     }
 
-    fn make_model_type(&self, line_idx: usize) -> Option<TopicDialogLine> {
-        let lines_ref = self.lines.borrow();
-        let line = lines_ref.get(line_idx)?;
-        let borrow = self.topic_dir.borrow();
-        let topic_dir = borrow.as_ref()?;
-        Some(TopicDialogLine {
-            substituted_line: line.0.clone().into(),
-            clean_line: line.spoken(&self.substitutions.borrow()).0.into(),
-            can_play: topic_dir.mp3_path(&line.spoken(&self.substitutions.borrow()).vo_hash()).exists(),
-            index: line_idx as i32,
-        })
-    }
-
     pub fn should_generate(&self, line_idx: usize, options: &MassGenerationOptions) -> bool {
-        let borrow = self.topic_dir.borrow();
-        let topic_dir = if let Some(topic_dir) = borrow.deref() {
-            topic_dir
-        }else{
-            return false;
-        };
-        
-        if let Some(audio_path) = self.audio_path(line_idx) {
-            if !audio_path.exists() {
-                return true;
-            }
+        // don't generate if the line doesn't exist
+        let Some(line) = self.row_data(line_idx) else {return false;};
+
+        // generate if audio path doesn't exist
+        if !line.audio_path.exists() {
+            return true;
         }
 
-        // don't generate if the line doesn't exist
-        self.lines.borrow().get(line_idx).map_or(false, |line| {
-            let clean_line = line.spoken(&self.substitutions.borrow());
-            let vo_hash = clean_line.vo_hash();
-            let config_hash = topic_dir.get_config_hash(&vo_hash);
+        // generate if line has no associated config hash
+        let Some(config_hash) = line.config_hash else {return true;};
 
-            if let Some(config_hash) = config_hash {
-                if let Some(current_config_hash) = options.current_config_hash {
-                    // if there is a config hash to compare against, generate if they are different
-                    current_config_hash != config_hash
-                }else{
-                    false // config hash exists and we aren't regenerating stale
-                }
-            }else{
-                true // there is no config hash. Generate.
-            }
-        })
+        if let Some(current_config_hash) = options.current_config_hash {
+            // if there is a config hash to compare against, generate if they are different
+            current_config_hash != config_hash
+        }else{
+            false // no config hash to compare against
+        }
     }
 
     fn compute_expanded_lines(raw_lines: &Vec<RawTopicLine>, config: &TopicExpansionConfig, substitutions: &SubstitutionsMap) -> Vec<SubstitutedTopicLine> {
@@ -166,15 +139,8 @@ impl TopicModel {
             .par_iter().flat_map(|line| {line.substitute(&config)})
             // do not show empty lines
             .filter(|line| !line.spoken(&substitutions).0.is_empty())
-            /*.map(|line| {
-                TopicDialogLine {
-                    substituted_line: line.0.clone().into(),
-                    clean_line: line.clean().0.into(),
-                    can_play: topic_dir.wav_path(&line.clean().vo_hash()).exists()
-                }
-            })*/
             .collect::<Vec<_>>();
-        
+
         res.par_sort_by(|lhs, rhs| lhs.0.to_lowercase().cmp(&rhs.0.to_lowercase()));
 
         res
@@ -202,11 +168,6 @@ impl TopicModel {
             .flat_map(|line|
                 line.0.global_names()
             ).collect::<HashSet<_>>()
-        /*
-        self.lines.borrow().iter()
-            .flat_map(|line| {line.globals()})
-            .collect()
-         */
     }
     
     pub fn update_topic_file(&self, other_topic: &Path) -> Result<(), Error> {
@@ -231,20 +192,20 @@ impl Model for TopicModel {
     }
 
     fn row_data(&self, row: usize) -> Option<Self::Data> {
-        // TODO: this will no longer be necessary, but for now it protects following unwraps
-        let Some(t) = self.make_model_type(row) else{return None};
+        let Some(line) = self.lines.borrow().get(row).cloned() else {
+            return None;
+        };
 
-        let line = self.lines.borrow().get(row).unwrap().clone();
         let spoken = line.spoken(&self.substitutions.borrow());
-        let audio_path = self.audio_path(row).unwrap();
+        let audio_path = self.audio_path(row).expect("row existence was just checked");
         let config_hash = self.topic_dir.borrow().as_ref()?.get_config_hash(&spoken.vo_hash());
         Some(
             TopicLine {
                 raw_line: line.1.clone(),
                 substituted_line: line.clone(),
-                config_hash: config_hash,
+                config_hash,
                 spoken_topic_line: spoken,
-                audio_path: audio_path
+                audio_path
             }
         )
     }

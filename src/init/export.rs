@@ -1,7 +1,8 @@
+use crate::audio_conversion::{mp3_to_wav, WavPath};
 use crate::create_fuz::wav_to_fuz;
 use crate::dbvo_manifest::DBVOManifest;
 use crate::init::errors::make_error;
-use crate::init::receivers::{ErrorSender, ProgressSender};
+use crate::init::receivers::ProgressSender;
 use crate::init::ProgressHandleSpawner;
 use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::Determinate;
@@ -9,11 +10,11 @@ use crate::models::TopicModel;
 use crate::project_dir::hashes::VOHash;
 use crate::project_dir::project_dir::{FomodPaths, ProjectDir};
 use crate::project_dir::topic_lines::SpokenTopicLine;
-use crate::{AppWindow, DBVOExportDialogue, DBVOExportOptions, Dialogs, FOMODExportDialogue, FOMODExportOptions, FolderExportDialogue, FolderExportOptions, FolderNamingPolicy, PathSelection, TopicListItem, TopicsModel, UIError};
+use crate::{AppWindow, DBVOExportDialogue, DBVOExportOptions, Dialogs, FOMODExportDialogue, FOMODExportOptions, FolderExportDialogue, FolderExportOptions, FolderNamingPolicy, PathSelection, TopicsModel, UIError};
 use async_compat::Compat;
 use futures::{stream, StreamExt};
 use lazy_regex::regex;
-use slint::{spawn_local, ComponentHandle, Model, SharedString, ToSharedString, VecModel};
+use slint::{spawn_local, ComponentHandle, Model, SharedString, ToSharedString};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::error::Error;
@@ -24,15 +25,12 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use serde::{Serialize, Serializer};
 use tokio_util::future::FutureExt;
-use tokio_util::sync::CancellationToken;
-use crate::audio_conversion::{mp3_to_wav, WavPath};
 
 pub struct PackedDialogues {
-    pub export_to_folder: FolderExportDialogue,
-    pub export_to_dbvo: DBVOExportDialogue,
-    pub export_to_fomod: FOMODExportDialogue
+    pub _export_to_folder: FolderExportDialogue,
+    pub _export_to_dbvo: DBVOExportDialogue,
+    pub _export_to_fomod: FOMODExportDialogue
 }
 
 fn format_as_file(name: String) -> String {
@@ -85,17 +83,16 @@ async fn do_export_to_folder(topics_model: &Rc<TopicsModel>, options: &FolderExp
             .map_err(|e| make_error(&format!("Failed to create topic subdir '{}': {e:?}", export_file_root.to_string_lossy())))?;
 
         for i in 0..num_dialogues {
-            let src = topic.audio_path(i).ok_or(changed_err.clone())?;
-            if !src.exists() {
+            let line = topic.row_data(i).ok_or(changed_err.clone())?;
+            if !line.audio_path.exists() {
                 continue;
             }
-
-            let data = topic.row_data(i).ok_or(changed_err.clone())?;
-            let hash = SpokenTopicLine(data.spoken_topic_line.to_string()).vo_hash();
-            let expanded = data.substituted_line;
+            
+            let hash = SpokenTopicLine(line.spoken_topic_line.to_string()).vo_hash();
+            let expanded = line.substituted_line;
             let file_name = match options.naming_policy {
-                FolderNamingPolicy::ExactSpokenDialogue => { data.spoken_topic_line.to_string() }
-                FolderNamingPolicy::FormattedSpokenDialogue => { format_as_file(data.spoken_topic_line.to_string()) }
+                FolderNamingPolicy::ExactSpokenDialogue => { line.spoken_topic_line.to_string() }
+                FolderNamingPolicy::FormattedSpokenDialogue => { format_as_file(line.spoken_topic_line.to_string()) }
                 FolderNamingPolicy::ExactExpandedDialogue => { expanded.0.clone() }
                 FolderNamingPolicy::FormattedExpandedDialogue => { format_as_file(expanded.0.clone()) }
                 FolderNamingPolicy::MD5Hash => { hash.to_string() }
@@ -109,8 +106,8 @@ async fn do_export_to_folder(topics_model: &Rc<TopicsModel>, options: &FolderExp
                 progress: i as u64,
             });
             progress_sender.send(progress).expect("failed to send progress");
-            tokio::fs::copy(&src.deref(), &dest).await
-                .map_err(|e| make_error(&format!("Failed to copy '{}' to '{}': {e:?}", src.to_string_lossy(), dest.to_string_lossy())))?;
+            tokio::fs::copy(&line.audio_path.deref(), &dest).await
+                .map_err(|e| make_error(&format!("Failed to copy '{}' to '{}': {e:?}", line.audio_path.to_string_lossy(), dest.to_string_lossy())))?;
             //ProgressState::Inflight(ProgressVal::Determinate {})
         }
     }
@@ -176,12 +173,12 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
     // mut access to the processing_set refcell is safe here if the mut ref is never held across an async boundary
     // and futures are not advanced on separate threads (this scenario should be impossible to compile anyways because there is no mutex)
     let changed_err = make_error("Model changed when exporting.");
-    let src = topic_model.audio_path(i).ok_or(changed_err.clone())?;
-    if !src.exists() {
-        return Ok(());
-    }
+    
 
     let line = topic_model.row_data(i).ok_or(changed_err.clone())?;
+    if !line.audio_path.exists() {
+        return Ok(());
+    }
 
     let hash = line.spoken_topic_line.vo_hash();
     let Some(_processing_ticket) = processing_ticker.declare(hash) else {
@@ -190,10 +187,10 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
 
     let expanded = line.substituted_line;
     let file_name = format_as_file(expanded.0.clone());
-    let cache_dest = src.with_extension("fuz");
+    let cache_dest = line.audio_path.with_extension("fuz");
     let final_dest = audio_dir.join(&file_name).with_added_extension("fuz");
     // if the fuz file is newer than the wav file, we don't need to re-process it
-    if cache_dest.exists() && is_newer_than(&cache_dest, &src) {
+    if cache_dest.exists() && is_newer_than(&cache_dest, &line.audio_path) {
         tokio::fs::copy(&cache_dest, &final_dest).await
             .map_err(|e| make_error(&format!("Failed to move created fuz '{}': {e}", &final_dest.to_string_lossy())))?;
         return Ok(());
@@ -201,7 +198,7 @@ async fn process_export_fuz(i: usize, topic_model: &TopicModel, audio_dir: &Path
     let tmp_wav_file = tempfile::Builder::new().suffix(".wav").tempfile()
         .map_err(|e| make_error(&format!("Failed to create temporary file '{}': {e}", &final_dest.to_string_lossy())))?;
     let tmp_wav_file = WavPath::from(tmp_wav_file.path().to_path_buf());
-    mp3_to_wav(&src, &tmp_wav_file).await
+    mp3_to_wav(&line.audio_path, &tmp_wav_file).await
         .map_err(|e| make_error(&format!("Failed to make wav file '{}': {e}", &final_dest.to_string_lossy())))?;
 
     wav_to_fuz(&tmp_wav_file, &OsString::from(expanded.0), &cache_dest).await
@@ -221,7 +218,7 @@ async fn make_dbvo_dirs(export_folder: &Path, options: &DBVOExportOptions, topic
         voice_pack_id: options.voice_pack_id.clone().into(),
     }).expect("Failed to serialize DBVOManifest, which shouldn't be possible since it's so simple.");
 
-    let export_folder = if(options.separate_topics) {
+    let export_folder = if options.separate_topics {
         export_folder.join(format!("{} - {topic_name}", options.voice_pack_name))
     }else{
         export_folder.into()
@@ -562,5 +559,9 @@ pub fn init_export(
     });
 
 
-    Ok(PackedDialogues {export_to_folder, export_to_dbvo, export_to_fomod})
+    Ok(PackedDialogues {
+        _export_to_folder: export_to_folder,
+        _export_to_dbvo: export_to_dbvo,
+        _export_to_fomod: export_to_fomod
+    })
 }

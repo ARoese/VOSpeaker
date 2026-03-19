@@ -1,13 +1,6 @@
+use crate::{AppWindow, DialogueFilterOptions, FilterActions, TopicDialogLine};
 use slint::ModelExt;
-use crate::{AppWindow, DialogueFilterOptions, FilterActions, TopicDialogLine, TopicListItem};
-use slint::{ComponentHandle, ModelRc, SharedString};
-
-#[derive(Default)]
-struct DialogueFilter {
-    contains: SharedString,
-    search_in_spoken: bool,
-    search_in_expanded: bool
-}
+use slint::{ComponentHandle, ModelRc};
 
 fn filter_line(options: &DialogueFilterOptions, line: &TopicDialogLine) -> bool {
     let search_term = options.search_term.to_lowercase();
@@ -24,7 +17,8 @@ fn filter_line(options: &DialogueFilterOptions, line: &TopicDialogLine) -> bool 
     if options.search_in_spoken && line.clean_line.to_lowercase().contains(&search_term) {
         return true
     }
-    return false;
+    
+    false
 }
 
 pub fn init_filters(ui: &AppWindow) {

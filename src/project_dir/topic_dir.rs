@@ -1,12 +1,12 @@
+use crate::audio_conversion::Mp3Path;
 use crate::project_dir::config_map_file::ConfigMapFile;
 use crate::project_dir::hashes::{ConfigHash, VOHash};
 use crate::project_dir::topic_file::TopicFile;
+use crate::project_dir::topic_lines::RawTopicLine;
 use std::cell::RefCell;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
-use crate::audio_conversion::Mp3Path;
-use crate::project_dir::topic_lines::RawTopicLine;
 
 pub struct TopicDir {
     path: PathBuf,
@@ -61,10 +61,6 @@ impl TopicDir {
     pub fn mp3_path(&self, hash: &VOHash) -> Mp3Path {
         let mp3_file_name = hash.to_string().to_lowercase() + ".mp3";
         Mp3Path::from(self.path.join(mp3_file_name))
-    }
-
-    pub fn topic_file(&self) -> PathBuf {
-        topic_file(&self.path)
     }
     
     pub fn topic_file_ref(&self) -> &TopicFile {

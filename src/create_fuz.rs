@@ -1,9 +1,9 @@
+use crate::audio_conversion::WavPath;
 use crate::static_resources;
 use lazy_regex::regex;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{Debug, Display, Formatter};
-use std::io::BufRead;
 use std::ops::Deref;
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::OsStringExt;
@@ -12,7 +12,6 @@ use std::sync::{Arc, LazyLock};
 use tokio::join;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
-use crate::audio_conversion::WavPath;
 // NOTE: All paths will be unix paths until the instant of a subprocess's execution. A user of this
 // module should NOT have to worry about platform-specific stuff
 
@@ -42,7 +41,7 @@ async fn windows_paths<const LEN: usize>(paths: [&Path; LEN]) -> Result<[PathBuf
             .map(|p| PathBuf::from(OsString::from_vec(p.to_vec())))
             .collect::<Vec<_>>()
             .try_into()
-            .map_err(|e| {
+            .map_err(|_| {
                 eprintln!("{:?}", str::from_utf8(&output.stdout));
                 "Invalid winepath output".to_string()
             })?;
@@ -244,12 +243,10 @@ pub async fn wav_to_fuz(wav_path: &WavPath, dialogue_text: &OsStr, fuz_destinati
     create_fuz(&xwm_path, &lip_path, fuz_destination_path).await?;
 
     // clean up intermediates
-    if true {
-        // don't need the resampled file
-        tokio::fs::remove_file(&resampled_wav_path.deref()).await?;
-        tokio::fs::remove_file(&lip_path).await?;
-        tokio::fs::remove_file(&xwm_path).await?;
-    }
+    // don't need the resampled file
+    tokio::fs::remove_file(&resampled_wav_path.deref()).await?;
+    tokio::fs::remove_file(&lip_path).await?;
+    tokio::fs::remove_file(&xwm_path).await?;
 
     if !fuz_destination_path.exists() {
         return Err(Box::new(WavToFuzError{reason: format!("Output fuz '{}' does not exist, but command also did not fail.", fuz_destination_path.to_string_lossy())}));

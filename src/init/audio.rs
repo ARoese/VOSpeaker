@@ -1,4 +1,3 @@
-use crate::models::TopicModel;
 use crate::{AppWindow, Audio, TopicsModel};
 use rodio::Sink;
 use slint::{ComponentHandle, Model};

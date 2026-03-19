@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::path::PathBuf;
 use tokio::process::Command;
 
 pub struct WavPath(PathBuf);
@@ -24,11 +23,6 @@ impl Deref for Mp3Path {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
-}
-
-pub enum AudioPath {
-    Wav(WavPath),
-    Mp3(Mp3Path)
 }
 
 static MP3_BITRATE: &str = "96k"; 
@@ -60,7 +54,7 @@ pub async fn mp3_to_wav(src: &Mp3Path, dst: &WavPath) -> Result<(), Box<dyn Erro
     // NOTE: Bits per sample MUST be 16.
     // NOTE: Otherwise, the tools used in the project will fail.
     let dst_certain = dst.with_extension("wav");
-    let mut result = Command::new("ffmpeg")
+    let result = Command::new("ffmpeg")
         .arg("-y")
         .arg("-i")
         .arg(src.deref())

@@ -1,23 +1,17 @@
+use crate::audio_conversion::{wav_to_mp3, WavPath};
 use crate::chatterbox_generator::{ChatterboxGenerator, ChatterboxGeneratorConfig};
 use crate::dialog_generator::{ConfigHashable, DialogGenerator};
 use crate::init::errors::{make_error, raise};
 use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::{Determinate, Indeterminate};
-use crate::init::{ProgressHandle, ProgressHandleSpawner, ProgressState};
-use crate::models::{MassGenerationOptions, TopicModel};
-use crate::project_dir::topic_lines::SpokenTopicLine;
+use crate::init::{ProgressHandle, ProgressHandleSpawner};
+use crate::models::MassGenerationOptions;
 use crate::{AppWindow, GenerationActions, TopicsModel, UIError};
 use async_compat::Compat;
 use slint::{spawn_local, ComponentHandle, JoinHandle, Model, Weak};
-use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
-use futures::TryFutureExt;
-use tokio::sync::mpsc;
-use tokio::sync::watch::Sender;
 use tokio_util::future::FutureExt;
-use tokio_util::sync::CancellationToken;
-use crate::audio_conversion::{wav_to_mp3, WavPath};
 
 // TODO: make this result for error prop
 async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, topic_idx: i32, line_idx: i32) -> Result<(), UIError> {

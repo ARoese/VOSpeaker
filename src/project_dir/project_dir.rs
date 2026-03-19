@@ -2,13 +2,12 @@ use crate::chatterbox_generator::ChatterboxGeneratorConfig;
 use crate::dbvo_manifest::DBVOManifest;
 use crate::project_dir::topic_dir::TopicDir;
 use crate::project_dir::topic_lines::TopicExpansionConfig;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error as ErrorTrait;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use crate::FOMODExportOptions;
 
 pub struct ProjectDir {
     pub path: PathBuf
@@ -63,7 +62,7 @@ impl ProjectDir {
 
     pub fn save_expansion_config(&self, mut config: TopicExpansionConfig) -> Result<(), Box<dyn ErrorTrait>> {
         // do not save expansions with empty lists. Instead, let them be initialized as default upon reading
-        config.expansions = config.expansions.into_iter().filter(|(k,v)| !v.is_empty()).collect();
+        config.expansions = config.expansions.into_iter().filter(|(_,v)| !v.is_empty()).collect();
 
         let expansions_string = toml::to_string(&config)?;
         let expansions_path = self.path.join(Self::EXPANSIONS_CONF_NAME);

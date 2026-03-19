@@ -1,10 +1,9 @@
-use std::cell::RefCell;
 use crate::project_dir::topic_lines::RawTopicLine;
+use std::cell::RefCell;
 use std::fs::OpenOptions;
 use std::io;
-use std::io::{BufRead, Error, Read};
+use std::io::{BufRead, Error};
 use std::path::{Path, PathBuf};
-use rayon::prelude::ParallelSliceMut;
 
 fn read_topic_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
     let file = OpenOptions::new().read(true).open(path)?;
@@ -25,7 +24,7 @@ fn read_topic_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
         line+=1;
         bytes.clear();
     }
-    
+
     lines.sort_unstable();
     lines.dedup();
 

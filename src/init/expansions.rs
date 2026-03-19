@@ -1,8 +1,8 @@
-use std::cell::RefCell;
 use crate::project_dir::project_dir::ProjectDir;
 use crate::project_dir::topic_lines::TopicExpansionConfig;
 use crate::{AppWindow, Expansion, Mappings, TopicsModel};
 use slint::{ComponentHandle, Model, ModelExt, ModelNotify, ModelRc, ModelTracker, SharedString, ToSharedString};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 

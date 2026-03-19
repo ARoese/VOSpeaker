@@ -74,10 +74,6 @@ impl ConfigMapFile {
         self.map.get(vo_hash)
     }
 
-    pub fn hashes(&self) -> impl Iterator<Item = (&VOHash, &ConfigHash)> + '_ {
-        self.map.iter()
-    }
-
     /// this leaves the file and struct desynchronized. Callers are expected to resolve this
     fn clear_file(&mut self) -> Result<(), Error> {
         self.file.set_len(0)?;
@@ -90,6 +86,10 @@ impl ConfigMapFile {
         self.clear_file()?;
         self.map.clear();
         Ok(())
+    }
+
+    pub fn hashes(&self) -> impl Iterator<Item = (&VOHash, &ConfigHash)> + '_ {
+        self.map.iter()
     }
 
     pub fn squish(&mut self) -> Result<(), Error> {

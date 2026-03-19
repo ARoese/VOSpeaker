@@ -1,7 +1,7 @@
-use std::cell::RefCell;
 use crate::project_dir::project_dir::ProjectDir;
 use crate::{AppWindow, SubstitutionsActions, TopicsModel};
 use slint::{ComponentHandle, Model, SharedString, ToSharedString};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 

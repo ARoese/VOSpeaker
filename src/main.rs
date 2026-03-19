@@ -11,27 +11,22 @@ mod init;
 mod project_dir;
 mod audio_conversion;
 
-use crate::dialog_generator::{ConfigHashable, DialogGenerator};
+use crate::init::{init_batch_tools, init_filters, ProgressHandleSpawner};
+use crate::models::TopicModel;
+use crate::project_dir::topic_lines::TopicExpansionConfig;
 use crate::static_resources::init_resources_dir;
 use clap::Parser;
-use futures::StreamExt;
 use init::{init_dialogue_audio, init_export, init_generation, init_generator, init_receivers, init_topics};
 use project_dir::project_dir::ProjectDir;
 use rfd::MessageButtons;
 use serde::{Deserialize, Serialize};
-use slint::{quit_event_loop, MapModel, Model, ModelRc, StandardListViewItem, ToSharedString, VecModel};
+use slint::{quit_event_loop, ModelRc, StandardListViewItem, ToSharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fmt::Display;
 use std::fs;
-use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use tokio_util::future::FutureExt;
-use crate::init::{init_batch_tools, init_filters, ProgressHandleSpawner};
-use crate::models::{IndexedModel, TopicLine, TopicModel};
-use crate::project_dir::topic_lines::TopicExpansionConfig;
 
 slint::include_modules!();
 
@@ -44,7 +39,7 @@ fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     let (error_sender, progress_sender, cancellation_token) = init_receivers(&ui);
 
     let phs = ProgressHandleSpawner {
-        progress_sender: progress_sender,
+        progress_sender,
         error_sender: error_sender.clone(),
         cancellation: cancellation_token
     };
@@ -59,7 +54,7 @@ fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     init_dialogue_audio(&ui, &topics_model);
     init_filters(&ui);
 
-    let packed_dialogs = init_export(&ui, &topics_model, &project_dir, &phs)?;
+    let _packed_dialogs = init_export(&ui, &topics_model, &project_dir, &phs)?;
     init_batch_tools(&ui, &topics_model, &phs)?;
     ui.run()?;
 
@@ -105,10 +100,11 @@ fn looks_like_project_dir(path: &Path) -> bool {
     if !path.exists() {
         return false;
     }
+    
     if let Ok(project_dir) = ProjectDir::new(path) {
-        return project_dir.topics_path().exists();
+        project_dir.topics_path().exists()
     }else{
-        return false;
+        false
     }
 }
 
@@ -217,7 +213,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let resources_guard = init_resources_dir();
+    let _resources_guard = init_resources_dir();
     run_main_app(project_dir)?;
     
     while !cli_had_project_dir && let Some(project_dir) = run_project_picker_gui()? {

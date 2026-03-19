@@ -1,17 +1,17 @@
-use std::cell::RefCell;
 use crate::init::errors::make_error;
+use crate::init::{init_expansions, init_substitutions, ErrorSender};
 use crate::models::{IndexedModel, TopicModel};
 use crate::project_dir::project_dir::ProjectDir;
 use crate::project_dir::topic_dir::TopicDir;
 use crate::project_dir::topic_lines::TopicExpansionConfig;
 use crate::{AppWindow, TopicDialogLine, TopicListItem, UIError};
-use slint::{spawn_local, ComponentHandle, Model, ModelExt, ModelRc, SortModel, ToSharedString, VecModel, Weak};
+use slint::{spawn_local, Model, ModelExt, ModelRc, ToSharedString, VecModel};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::rc::Rc;
 use tokio::sync::mpsc;
-use crate::init::{init_expansions, init_substitutions, ErrorSender, ExpansionsConfigModel};
 
 pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>,  error_sender: &ErrorSender, topic_files: &Vec<PathBuf>) {
     for path in topic_files {
@@ -103,7 +103,7 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
         }
     });
 
-    let expansions_config_model = init_expansions(ui, &topics_model, project_dir, expand_config.clone());
+    let _expansions_config_model = init_expansions(ui, &topics_model, project_dir, expand_config.clone());
     init_substitutions(ui, &topics_model, project_dir, substitutions.clone());
 
     let sorted_topics = IndexedModel::new(topics_model.clone().into())

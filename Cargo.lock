@@ -13,7 +13,6 @@ dependencies = [
  "dirs",
  "futures",
  "lazy-regex",
- "log",
  "maplit",
  "md5",
  "rayon",

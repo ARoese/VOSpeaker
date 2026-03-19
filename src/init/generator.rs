@@ -1,7 +1,7 @@
 use crate::chatterbox_generator::ChatterboxGeneratorConfig;
 use crate::project_dir::project_dir::ProjectDir;
-use crate::{AppWindow, FilePicking, TopicListItem, TopicsModel};
-use slint::{ComponentHandle, ModelRc, SharedString};
+use crate::{AppWindow, FilePicking};
+use slint::{ComponentHandle, SharedString};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 

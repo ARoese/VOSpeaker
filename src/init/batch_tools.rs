@@ -1,21 +1,16 @@
-use std::cell::RefCell;
-use std::error::Error;
-use std::ops::Deref;
-use std::rc::Rc;
-use async_compat::Compat;
-use rfd::MessageButtons;
-use rfd::MessageDialogResult::{No, Yes};
-use slint::{spawn_local, ComponentHandle, Model, ModelRc, Weak};
-use thiserror::__private17::AsDisplay;
-use tokio_util::future::FutureExt;
-use tokio_util::sync::CancellationToken;
-use crate::{AppWindow, Dialogs, TopicListItem, TopicsModel, UIError};
-use crate::init::{ErrorSender, ProgressHandle, ProgressHandleSpawner, ProgressSender};
 use crate::init::errors::make_error;
 use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::Determinate;
-use crate::models::TopicModel;
+use crate::init::{ProgressHandle, ProgressHandleSpawner};
 use crate::project_dir::topic_lines::SpokenTopicLine;
+use crate::{AppWindow, Dialogs, TopicsModel, UIError};
+use async_compat::Compat;
+use rfd::MessageButtons;
+use rfd::MessageDialogResult::Yes;
+use slint::{spawn_local, ComponentHandle, Model};
+use std::error::Error;
+use std::rc::Rc;
+use tokio_util::future::FutureExt;
 
 fn is_short_dialogue(dialogue: &SpokenTopicLine) -> bool {
     let num_words = dialogue.0.split(" ").count();
