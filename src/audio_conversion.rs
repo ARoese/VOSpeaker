@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
 pub struct WavPath(PathBuf);
@@ -25,7 +25,31 @@ impl Deref for Mp3Path {
     }
 }
 
-static MP3_BITRATE: &str = "96k"; 
+
+static MP3_BITRATE: &str = "96k";
+pub async fn any_to_mp3(src: &Path, dst: &Mp3Path) -> Result<(), Box<dyn Error>> {
+    // TODO: make this platform-independent
+    let dst_certain = dst.with_extension("mp3");
+    let result = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-i")
+        .arg(src)
+        .arg("-b:a")
+        .arg(MP3_BITRATE)
+        .arg(&dst_certain)
+        .output().await?;
+
+    if !result.status.success() {
+        tokio::fs::remove_file(dst_certain).await.ok(); // the other error is more important
+        return Err(format!("ffmpeg failed.\n\tStdErr: {}", String::from_utf8_lossy(&result.stderr)).into());
+    }
+
+    if !dst_certain.eq(dst.deref()) {
+        tokio::fs::rename(dst_certain, dst.deref()).await?;
+    }
+    Ok(())
+}
+
 pub async fn wav_to_mp3(src: &WavPath, dst: &Mp3Path) -> Result<(), Box<dyn Error>> {
     // TODO: make this platform-independent
     let dst_certain = dst.with_extension("mp3");

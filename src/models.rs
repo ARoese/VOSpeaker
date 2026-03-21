@@ -114,26 +114,6 @@ impl TopicModel {
         Ok(())
     }
 
-    pub fn should_generate(&self, line_idx: usize, options: &MassGenerationOptions) -> bool {
-        // don't generate if the line doesn't exist
-        let Some(line) = self.row_data(line_idx) else {return false;};
-
-        // generate if audio path doesn't exist
-        if !line.audio_path.exists() {
-            return true;
-        }
-
-        // generate if line has no associated config hash
-        let Some(config_hash) = line.config_hash else {return true;};
-
-        if let Some(current_config_hash) = options.current_config_hash {
-            // if there is a config hash to compare against, generate if they are different
-            current_config_hash != config_hash
-        }else{
-            false // no config hash to compare against
-        }
-    }
-
     fn compute_expanded_lines(raw_lines: &Vec<RawTopicLine>, config: &TopicExpansionConfig, substitutions: &SubstitutionsMap) -> Vec<SubstitutedTopicLine> {
         let mut res = raw_lines
             .par_iter().flat_map(|line| {line.substitute(&config)})
@@ -151,7 +131,7 @@ impl TopicModel {
         Some(self.topic_dir.borrow().as_ref()?.mp3_path(&vo_line.spoken(&self.substitutions.borrow()).vo_hash()))
     }
     
-    pub fn mp3_written_for(&self, line_idx: usize) {
+    pub fn mp3_modified_for(&self, line_idx: usize) {
         self.notify.row_changed(line_idx);
     }
 

@@ -17,6 +17,8 @@ export struct TopicListItem {
 
 export global Audio {
     callback play_dialog(int, int);
+    callback import_audio(int, int);
+    callback delete_audio(int, int);
 }
 
 export global FilterActions {
@@ -31,6 +33,9 @@ component TopicListItemView inherits VerticalLayout {
     callback generate_audio(int);
     callback play_audio(int);
     callback delete_topic();
+
+    callback import_audio(int);
+    callback delete_audio(int);
 
     Rectangle {
         height: 30px;
@@ -101,44 +106,57 @@ component TopicListItemView inherits VerticalLayout {
         visible: expanded;
         vertical-stretch: expanded ? 1.0 : 0.0;
         for dLine[i] in FilterActions.filtered(filter_options, item.dialog_lines): VerticalLayout{
-            HorizontalLayout {
-                padding: 4px;
-                if dLine.can_play: Button {
-                    colorize-icon: true;
-                    icon: @image-url("assets/play.svg");
-                    text: "play";
-                    clicked => {
-                        root.play_audio(dLine.index);
+            ContextMenuArea {
+                Menu {
+                    MenuItem {
+                        title: "Import audio";
+                        activated => {import_audio(dLine.index)}
+                    }
+                    MenuSeparator {}
+                    MenuItem {
+                        title: "Delete audio";
+                        activated => {delete_audio(dLine.index)}
                     }
                 }
-
-                if !dLine.can_play: Button {
-                    colorize-icon: true;
-                    icon: @image-url("assets/audio-lines.svg");
-                    text: "generate";
-                    clicked => {generate_audio(dLine.index)}
-                }
-
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    Text{
-                        color: Palette.foreground;
-                        overflow: elide;
-                        text: dLine.clean_line;
+                HorizontalLayout {
+                    padding: 4px;
+                    if dLine.can_play: Button {
+                        colorize-icon: true;
+                        icon: @image-url("assets/play.svg");
+                        text: "play";
+                        clicked => {
+                            root.play_audio(dLine.index);
+                        }
                     }
-                    Text{
-                        color: Palette.foreground.transparentize(0.6);
-                        overflow: elide;
-                        text: dLine.substituted-line;
-                    }
-                }
 
-                if dLine.can_play: Button {
-                    // to keep it out of the scrollbar
-                    colorize-icon: true;
-                    icon: @image-url("assets/redo.svg");
-                    text: "regenerate";
-                    clicked => {generate_audio(dLine.index)}
+                    if !dLine.can_play: Button {
+                        colorize-icon: true;
+                        icon: @image-url("assets/audio-lines.svg");
+                        text: "generate";
+                        clicked => {generate_audio(dLine.index)}
+                    }
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        Text{
+                            color: Palette.foreground;
+                            overflow: elide;
+                            text: dLine.clean_line;
+                        }
+                        Text{
+                            color: Palette.foreground.transparentize(0.6);
+                            overflow: elide;
+                            text: dLine.substituted-line;
+                        }
+                    }
+
+                    if dLine.can_play: Button {
+                        // to keep it out of the scrollbar
+                        colorize-icon: true;
+                        icon: @image-url("assets/redo.svg");
+                        text: "regenerate";
+                        clicked => {generate_audio(dLine.index)}
+                    }
                 }
             }
         }
@@ -194,6 +212,14 @@ export component TopicList inherits VerticalLayout {
         generate_audio(line_no) => {
             //debug("generating");
             GenerationActions.generate_dialogue(model[expanded_index].index, line_no)
+        }
+
+        import_audio(line_no) => {
+            Audio.import_audio(model[expanded_index].index, line_no)
+        }
+
+        delete_audio(line_no) => {
+            Audio.delete_audio(model[expanded_index].index, line_no)
         }
     }
 

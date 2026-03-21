@@ -5,7 +5,7 @@ use crate::init::errors::{make_error, raise};
 use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::{Determinate, Indeterminate};
 use crate::init::{ProgressHandle, ProgressHandleSpawner};
-use crate::models::MassGenerationOptions;
+use crate::models::{MassGenerationOptions, TopicModel};
 use crate::{AppWindow, GenerationActions, TopicsModel, UIError};
 use async_compat::Compat;
 use slint::{spawn_local, ComponentHandle, JoinHandle, Model, Weak};
@@ -51,8 +51,29 @@ async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topics_model: Rc<Top
     let topic_dir = borrow.deref().as_ref().ok_or(make_error("topic dir was moved out of model during generation"))?;
     topic_dir.add_vo(&vo_hash, &config_hash)
         .map_err(|err| make_error(&format!("Error writing vo file: {}", err)))?;
-    topic.mp3_written_for(line_idx as usize);
+    topic.mp3_modified_for(line_idx as usize);
     Ok(())
+}
+
+fn should_generate(model: &TopicModel, line_idx: usize, options: &MassGenerationOptions) -> bool {
+    let Some(line) = model.row_data(line_idx) else {return false;};
+    // generate if audio path doesn't exist
+    if !line.audio_path.exists() {
+        return true;
+    }
+
+    // generate if line has no associated config hash
+    let Some(config_hash) = line.config_hash else {return true;};
+
+    // do not mass re-generate user-provided audio
+    if config_hash.is_null_hash() {return false;}
+
+    if let Some(current_config_hash) = options.current_config_hash {
+        // if there is a config hash to compare against, generate if they are different
+        current_config_hash != config_hash
+    }else{
+        false // no config hash to compare against
+    }
 }
 
 async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, handle: &ProgressHandle, options: &MassGenerationOptions) -> Result<(), UIError> {
@@ -60,13 +81,13 @@ async fn batch_generate_dialogue_future(ui_weak: Weak<AppWindow>, topics_model: 
         let name = topic.get_topic_name().to_string();
 
         let num_to_generate = (0..topic.row_count())
-            .map(|line_idx| topic.should_generate(line_idx, &options))
+            .map(|line_idx| should_generate(&topic, line_idx, &options))
             .filter(|b| *b)
             .count();
 
         let mut num_generated = 0;
         for line_idx in 0..topic.row_count() {
-            if !topic.should_generate(line_idx, &options) {continue}
+            if !should_generate(&topic, line_idx, &options) {continue}
 
             handle.progress_sender.send(Inflight(Determinate {
                 status: format!("Generating topic [{}]", name),

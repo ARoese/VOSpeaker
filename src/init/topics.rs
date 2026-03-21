@@ -4,16 +4,20 @@ use crate::models::{IndexedModel, TopicModel};
 use crate::project_dir::project_dir::ProjectDir;
 use crate::project_dir::topic_dir::TopicDir;
 use crate::project_dir::topic_lines::TopicExpansionConfig;
-use crate::{AppWindow, TopicDialogLine, TopicListItem, UIError};
-use slint::{spawn_local, Model, ModelExt, ModelRc, ToSharedString, VecModel};
+use crate::{AppWindow, Audio, TopicDialogLine, TopicListItem, UIError};
+use slint::{spawn_local, ComponentHandle, Model, ModelExt, ModelRc, ToSharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::rc::Rc;
+use async_compat::{Compat, CompatExt};
+use tempfile::{NamedTempFile, TempPath};
 use tokio::sync::mpsc;
+use crate::audio_conversion::{any_to_mp3, mp3_to_wav, Mp3Path};
+use crate::project_dir::hashes::ConfigHash;
 
-pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>,  error_sender: &ErrorSender, topic_files: &Vec<PathBuf>) {
+pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>, error_sender: &ErrorSender, topic_files: &Vec<PathBuf>) {
     for path in topic_files {
         let topics_dir = project_dir.topics_path();
         let topic_prefix = path.file_prefix().expect("It shouldn't be possible to pick an empty path").to_string_lossy().to_string();
@@ -103,6 +107,102 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
         }
     });
 
+    ui.global::<Audio>().on_import_audio({
+        let topics_model = topics_model.clone();
+        let error_sender = error_sender.clone();
+        move |topic_idx, line_idx| {
+            let topics_model = topics_model.clone();
+            let error_sender = error_sender.clone();
+            println!("Importing {topic_idx}, {line_idx}");
+            let compat = Compat::new(async move {
+                let Some(source_file) = rfd::FileDialog::new()
+                    .set_title("Select audio file")
+                    .add_filter("Audio", &["wav", "mp3", "flac"])
+                    .add_filter("Other Audio Files", &["*"])
+                    .pick_file() else { return };
+
+
+                let tmp_mp3 = match NamedTempFile::with_suffix(".mp3") {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error_sender.send(make_error(&format!("Cannot create temp MP3 file: {e}")))
+                            .await.expect("Failed to send Error");
+                        return;
+                    }
+                };
+
+                let copy_source: Mp3Path = if source_file.extension().unwrap_or_default() == "mp3" {
+                    source_file.into()
+                }else{
+                    let tmp_mp3_path = tmp_mp3.path().to_path_buf().into();
+
+                    if let Err(e) = any_to_mp3(&source_file, &tmp_mp3_path).await {
+                        error_sender.send(make_error(&format!("Cannot convert file to mp3: {e}")))
+                            .await.expect("Failed to send Error");
+                        return;
+                    }
+
+                    tmp_mp3_path
+                };
+
+                let Some(topic) = topics_model.row_data(topic_idx as usize) else {return};
+                let Some(line) = topic.row_data(line_idx as usize) else {return};
+
+                if let Err(e) = tokio::fs::copy(&copy_source.to_path_buf(), &line.audio_path.to_path_buf()).await {
+                    error_sender.send(make_error(&format!("Failed to copy mp3 to project directory: {e}")))
+                        .await.expect("Failed to send Error");
+                    return;
+                }
+
+                let topic_dir = topic.topic_dir.borrow();
+                if let Some(topic_dir) = topic_dir.as_ref() {
+                    if let Err(e) = topic_dir.add_vo(&line.spoken_topic_line.vo_hash(), &ConfigHash::make_null_hash()) {
+                        error_sender.send(make_error(&format!("Failed to update ConfigHash: {e}")))
+                            .await.expect("Failed send Error");
+                        return;
+                    }
+                }else{
+                    return
+                }
+                topic.mp3_modified_for(line_idx as usize);
+            });
+
+            spawn_local(compat).expect("failed to spawn async local");
+        }
+    });
+
+    ui.global::<Audio>().on_delete_audio({
+        let topics_model = topics_model.clone();
+        let error_sender = error_sender.clone();
+
+        move |topic_idx, line_idx| {
+            println!("Deleting {topic_idx}, {line_idx}");
+            let topics_model = topics_model.clone();
+            let error_sender = error_sender.clone();
+            let compat = Compat::new(async move {
+                let Some(topic) = topics_model.row_data(topic_idx as usize) else {return};
+                let Some(line) = topic.row_data(line_idx as usize) else {return};
+
+                if let Err(e) = tokio::fs::remove_file(line.audio_path.to_path_buf()).await {
+                    error_sender.send(make_error(&format!("Failed to delete mp3 file: {e}")))
+                        .await.expect("Failed to send Error");
+                }
+                let topic_dir = topic.topic_dir.borrow();
+                if let Some(topic_dir) = topic_dir.as_ref() {
+                    if let Err(e) = topic_dir.add_vo(&line.spoken_topic_line.vo_hash(), &ConfigHash::make_null_hash()) {
+                        error_sender.send(make_error(&format!("Failed to update ConfigHash: {e}")))
+                            .await.expect("Failed to send Error");
+                    }
+                }else{
+                    return
+                }
+                topic.mp3_modified_for(line_idx as usize);
+            });
+
+            spawn_local(compat).expect("failed to spawn async local");
+        }
+    });
+
     let _expansions_config_model = init_expansions(ui, &topics_model, project_dir, expand_config.clone());
     init_substitutions(ui, &topics_model, project_dir, substitutions.clone());
 
@@ -132,6 +232,6 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
     let ui_topics = ModelRc::new(ui_topics);
 
     ui.set_topicListModel(ui_topics);
-    
+
     topics_model
 }

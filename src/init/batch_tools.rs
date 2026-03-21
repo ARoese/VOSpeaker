@@ -38,9 +38,11 @@ async fn delete_short_voicelines_action(topics: &Rc<TopicsModel>, progress_handl
                     progress: i as u64,
                 })
             ).ok();
+            
+            let is_user_provided = dialogue.config_hash.map(|ch| ch.is_null_hash()).unwrap_or(false);
 
             let spoken = dialogue.spoken_topic_line;
-            if is_short_dialogue(&spoken) {
+            if !is_user_provided && is_short_dialogue(&spoken) {
                 topic_item.delete_audio_file_for(i).await.map_err(|e| make_error(&format!("Failed to delete short voicelines: {e}")))?;
             }
         }
