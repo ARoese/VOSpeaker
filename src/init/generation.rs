@@ -13,7 +13,6 @@ use std::ops::Deref;
 use std::rc::Rc;
 use tokio_util::future::FutureExt;
 
-// TODO: make this result for error prop
 async fn generate_dialogue_future(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, topic_idx: i32, line_idx: i32) -> Result<(), UIError> {
     let ui = ui_weak.upgrade().unwrap();
     let config: ChatterboxGeneratorConfig = ui.get_genConfig()
@@ -126,7 +125,6 @@ fn batch_generate_dialogue_action(ui_weak: Weak<AppWindow>, topics_model: Rc<Top
 }
 
 fn generate_dialogue_action(ui_weak: Weak<AppWindow>, topics_model: Rc<TopicsModel>, handle: ProgressHandle, topic_idx: i32, line_idx: i32) -> JoinHandle<()> {
-    // TODO: send errors
     println!("generation requested for {}:{}", topic_idx, line_idx);
 
     let ui_weak = ui_weak.clone();

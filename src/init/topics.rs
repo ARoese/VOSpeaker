@@ -1,5 +1,5 @@
 use crate::init::errors::make_error;
-use crate::init::{format_as_file, init_expansions, init_substitutions, ErrorSender};
+use crate::init::{format_as_file, init_expansions, init_substitutions, ErrorSender, ExpansionsConfigModel};
 use crate::models::{IndexedModel, TopicModel};
 use crate::project_dir::project_dir::ProjectDir;
 use crate::project_dir::topic_dir::TopicDir;
@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use crate::audio_conversion::{any_to_mp3, mp3_to_any, Mp3Path};
 use crate::project_dir::hashes::ConfigHash;
 
-pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>, error_sender: &ErrorSender, topic_files: &Vec<PathBuf>) {
+pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>, error_sender: &ErrorSender, topic_files: &Vec<PathBuf>, expansions_config_model: &ExpansionsConfigModel) {
     for path in topic_files {
         let topics_dir = project_dir.topics_path();
         let topic_prefix = path.file_prefix().expect("It shouldn't be possible to pick an empty path").to_string_lossy().to_string();
@@ -56,6 +56,8 @@ pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<
             }
         }
     }
+    
+    expansions_config_model.refresh_expansions(topics_model);
 }
 
 pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: &Rc<RefCell<TopicExpansionConfig>>, substitutions: &Rc<RefCell<HashMap<String, String>>>, error_sender: &mpsc::Sender<UIError>) -> Rc<VecModel<Rc<TopicModel>>> {
@@ -67,12 +69,16 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
     ).collect::<Vec<_>>();
     let topics_model = Rc::new(VecModel::from(topic_dirs));
 
+    let expansions_config_model = init_expansions(ui, &topics_model, project_dir, expand_config.clone());
+    init_substitutions(ui, &topics_model, project_dir, substitutions.clone());
+
     ui.on_add_topic_from_path({
         let error_sender = error_sender.clone();
         let project_dir = project_dir.clone();
         let topics_model = topics_model.clone();
         let expand_config = expand_config.clone();
         let substitutions = substitutions.clone();
+        let expansions_config_model = expansions_config_model.clone();
         move || {
             let mut dialog = rfd::FileDialog::new();
             dialog = dialog.set_title("Select topic file(s)")
@@ -81,7 +87,7 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
                 .add_filter("All Files (*)", &["*"]);
 
             if let Some(files) = dialog.pick_files() {
-                add_topic_files(&project_dir, &topics_model, expand_config.clone(), substitutions.clone(),  &error_sender, &files);
+                add_topic_files(&project_dir, &topics_model, expand_config.clone(), substitutions.clone(),  &error_sender, &files, &expansions_config_model);
             }
         }
     });
@@ -89,6 +95,7 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
     ui.on_remove_topic({
         let error_sender = error_sender.clone();
         let topics_model = topics_model.clone();
+        let expansions_config_model = expansions_config_model.clone();
         move |idx| {
             let removed_model = topics_model.remove(idx as usize);
             if let Some(topic_dir) = Option::take(removed_model.topic_dir.borrow_mut().deref_mut()) {
@@ -103,6 +110,7 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
                         }
                     }).expect("failed to spawn async local");
                 }
+                expansions_config_model.refresh_expansions(&topics_model);
             }
         }
     });
@@ -247,9 +255,6 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
             spawn_local(compat).expect("failed to spawn async local");
         }
     });
-
-    let _expansions_config_model = init_expansions(ui, &topics_model, project_dir, expand_config.clone());
-    init_substitutions(ui, &topics_model, project_dir, substitutions.clone());
 
     let sorted_topics = IndexedModel::new(topics_model.clone().into())
         .sort_by(|lhs, rhs|

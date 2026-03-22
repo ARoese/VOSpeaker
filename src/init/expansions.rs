@@ -23,6 +23,21 @@ impl ExpansionsConfigModel {
     }
 }
 
+fn merge_expansions(mut a: HashMap<String, Vec<String>>, b: &HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    for (key, value) in b {
+
+        if let Some(expansions) = a.get_mut(key) {
+            // extend what's there
+            expansions.extend(value.iter().cloned())
+        } else {
+            // copy over the other expansions
+            a.insert(key.clone(), value.clone());
+        }
+    }
+
+    a
+}
+
 impl ExpansionsConfigModel {
     fn collect_index_keys(config: &TopicExpansionConfig) -> Vec<String> {
         let mut idx_keys = config.expansions.keys().cloned().collect::<Vec<String>>();
@@ -37,6 +52,33 @@ impl ExpansionsConfigModel {
         };
 
         *expansions = parse_expansions(new_expansions);
+    }
+
+    pub fn merge_expansion_collection(&self, new_expansions: &HashMap<String, Vec<String>>) {
+        let current = self.expansion_config.borrow().expansions.clone();
+        let merged = merge_expansions(current, new_expansions);
+        self.expansion_config.borrow_mut().expansions = merged;
+        self.expansion_config_reset();
+    }
+
+    pub fn refresh_expansions(&self, topics: &TopicsModel) {
+        let globals_list = collect_all_globals_in(topics);
+
+        // add new globals
+        let mut current = self.expansion_config.borrow_mut();
+        for global in &globals_list {
+            if !current.expansions.contains_key(global) {
+                current.expansions.insert(global.clone(), Vec::new());
+            }
+        }
+
+        // remove old globals which no longer exist
+        for extra in current.expansions.keys().cloned().collect::<HashSet<String>>().difference(&globals_list) {
+            current.expansions.remove(extra);
+        }
+
+        drop(current); // expansion config reset mutably borrows expansion_config, so we need this dropped here
+        self.expansion_config_reset();
     }
 
     fn expansion_config_reset(&self) {
@@ -91,11 +133,17 @@ fn parse_expansions(to_parse: &SharedString) -> Vec<String> {
     substitutions
 }
 
+fn collect_all_globals_in(topics: &TopicsModel) -> HashSet<String> {
+    topics.iter()
+        .flat_map(|topic| topic.collect_globals())
+        .collect()
+}
+
 pub fn init_expansions(ui: &AppWindow, topics_model: &Rc<TopicsModel>, project_dir: &ProjectDir, global_expansions_config: Rc<RefCell<TopicExpansionConfig>>) -> Rc<ExpansionsConfigModel> {
     let expand_config_disk = project_dir.load_expansion_config().unwrap_or(TopicExpansionConfig::default());
-    let generated_expand_mappings = topics_model.iter()
-        .flat_map(|topic| topic.collect_globals())
-        .map(|s| (s, vec![]))
+    let generated_expand_mappings = collect_all_globals_in(topics_model)
+        .iter()
+        .map(|s| (s.clone(), vec![]))
         .collect::<HashMap<_, Vec<String>>>();
 
     let generated_config = TopicExpansionConfig {
@@ -107,7 +155,6 @@ pub fn init_expansions(ui: &AppWindow, topics_model: &Rc<TopicsModel>, project_d
     ui.set_allowed_expansions(expand_config.max_expansions as i32);
     *global_expansions_config.borrow_mut() = expand_config;
     let expansions_config_model = Rc::new(ExpansionsConfigModel::new(global_expansions_config));
-    // TODO: this should be updated when topics are added/removed
 
     let expansions_model = ModelRc::from(expansions_config_model.clone());
     ui.set_expansions(expansions_model.clone());

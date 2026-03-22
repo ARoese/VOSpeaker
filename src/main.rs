@@ -31,6 +31,9 @@ slint::include_modules!();
 
 type TopicsModel = VecModel<Rc<TopicModel>>;
 fn run_main_app(project_dir: PathBuf) -> Result<(), Box<dyn Error>> {
+    // TODO: on all async functions, weak rcs should be moved into the closure rather than
+    // strong rcs. The strong RCs will create refloop memory leaks across calls to this function.
+    // Although they are memory leaks, they are very minor.
     let ui = AppWindow::new()?;
 
     let project_dir = Rc::from(ProjectDir::new(&project_dir)?);

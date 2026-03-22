@@ -13,10 +13,6 @@ use thiserror::Error;
 ///
 /// For example, the partial hash of a configuration for a remote service
 /// should not depend on the endpoint of that service
-///
-/// TODO: consider breaking up objects which need this property into
-/// TODO: a struct composing fields irrelevant for equality and a
-/// TODO: substruct of fields that should be hash-equivalent
 pub trait ConfigHashable
 where Self: DeserializeOwned {
     fn config_hash(&self) -> ConfigHash;

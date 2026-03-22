@@ -117,7 +117,6 @@ pub async fn create_xwm(wav_path: &WavPath, xwm_destination_path: &Path) -> Resu
 /// removes non-whitespace and non-word characters.
 /// mostly for stripping dialogue_text
 fn cmdline_string(string: &str) -> String {
-    // TODO: slow regex
     let invalid = regex!(r"\W|\S");
     invalid.replace_all(string, "").to_string()
 }
@@ -219,8 +218,6 @@ impl Display for WavToFuzError {
 
 impl Error for WavToFuzError {}
 
-// TODO: It might be necessary to make a tmpdir as a working dir for these files. The command lines get quite long, and the dialogue text appears
-// TODO: on them. Shortening the paths by putting them in a tmp dir will make more space. This hasn't been shown to be an issue yet.
 pub async fn wav_to_fuz(wav_path: &WavPath, dialogue_text: &OsStr, fuz_destination_path: &Path) -> Result<(), Box<dyn Error>> {
     let xwm_path = wav_path.with_extension("xwm");
     let lip_path = wav_path.with_extension("lip");
