@@ -33,7 +33,7 @@ pub struct PackedDialogues {
     pub _export_to_fomod: FOMODExportDialogue
 }
 
-fn format_as_file(name: String) -> String {
+pub fn format_as_file(name: String) -> String {
     // TODO: This incurs a severe performance penalty because of the regex matching.
     // TODO: It isn't super critical, but it should be optimized.
     /*

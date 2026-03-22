@@ -1,5 +1,5 @@
 use crate::init::errors::make_error;
-use crate::init::{init_expansions, init_substitutions, ErrorSender};
+use crate::init::{format_as_file, init_expansions, init_substitutions, ErrorSender};
 use crate::models::{IndexedModel, TopicModel};
 use crate::project_dir::project_dir::ProjectDir;
 use crate::project_dir::topic_dir::TopicDir;
@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::rc::Rc;
-use async_compat::{Compat, CompatExt};
-use tempfile::{NamedTempFile, TempPath};
+use async_compat::{Compat};
+use tempfile::{NamedTempFile};
 use tokio::sync::mpsc;
-use crate::audio_conversion::{any_to_mp3, mp3_to_wav, Mp3Path};
+use crate::audio_conversion::{any_to_mp3, mp3_to_any, Mp3Path};
 use crate::project_dir::hashes::ConfigHash;
 
 pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>, error_sender: &ErrorSender, topic_files: &Vec<PathBuf>) {
@@ -169,6 +169,51 @@ pub fn init_topics(ui: &AppWindow, project_dir: &Rc<ProjectDir>, expand_config: 
 
             spawn_local(compat).expect("failed to spawn async local");
         }
+    });
+
+    ui.global::<Audio>().on_export_audio({
+         let topics_model = topics_model.clone();
+         let error_sender = error_sender.clone();
+         move |topic_idx, line_idx| {
+             let topics_model = topics_model.clone();
+             let error_sender = error_sender.clone();
+             println!("Exporting {topic_idx}, {line_idx}");
+             let compat = Compat::new(async move {
+                 let Some(topic) = topics_model.row_data(topic_idx as usize) else {return};
+                 let Some(line) = topic.row_data(line_idx as usize) else {return};
+                 if !line.audio_path.exists() {
+                     error_sender.send(make_error(&"Dialogue line has no audio to export".to_string()))
+                         .await.expect("Error sending failed");
+                     return;
+                 }
+
+                 let recommended_file_name = format_as_file(line.substituted_line.0);
+                 let Some(dest_file) = rfd::FileDialog::new()
+                     .set_title("Select export file")
+                     .add_filter("mp3", &["mp3"])
+                     .add_filter("wav", &["wav"])
+                     .add_filter("flac", &["flac"])
+                     .add_filter("Other Audio Files", &["*"])
+                     .set_file_name(format!("{recommended_file_name}.mp3"))
+                     .save_file() else { return };
+
+                 if matches!(dest_file.extension(), Some(x) if x == "mp3") {
+                     // just copy the internal mp3
+                     if let Err(e) = tokio::fs::copy(line.audio_path.as_path(), &dest_file).await {
+                         error_sender.send(make_error(&format!("Failed to copy audio: {e}")))
+                             .await.expect("Error sending failed");
+                     }
+                 } else {
+                     // convert internal mp3 to whatever
+                     if let Err(e) = mp3_to_any(&line.audio_path, &dest_file).await {
+                         error_sender.send(make_error(&format!("Cannot convert audio: {e}")))
+                             .await.expect("Failed to send Error");
+                     }
+                 };
+             });
+
+             spawn_local(compat).expect("failed to spawn async local");
+         }
     });
 
     ui.global::<Audio>().on_delete_audio({

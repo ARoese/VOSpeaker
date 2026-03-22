@@ -18,6 +18,7 @@ export struct TopicListItem {
 export global Audio {
     callback play_dialog(int, int);
     callback import_audio(int, int);
+    callback export_audio(int, int);
     callback delete_audio(int, int);
 }
 
@@ -35,6 +36,7 @@ component TopicListItemView inherits VerticalLayout {
     callback delete_topic();
 
     callback import_audio(int);
+    callback export_audio(int);
     callback delete_audio(int);
 
     Rectangle {
@@ -112,10 +114,17 @@ component TopicListItemView inherits VerticalLayout {
                         title: "Import audio";
                         activated => {import_audio(dLine.index)}
                     }
-                    MenuSeparator {}
                     MenuItem {
+                        title: "Export audio";
+                        activated => {export_audio(dLine.index)}
+                    }
+                    MenuSeparator {}
+                    Menu {
                         title: "Delete audio";
-                        activated => {delete_audio(dLine.index)}
+                        MenuItem {
+                            title: "Delete";
+                            activated => {delete_audio(dLine.index)}
+                        }
                     }
                 }
                 HorizontalLayout {
@@ -216,6 +225,9 @@ export component TopicList inherits VerticalLayout {
 
         import_audio(line_no) => {
             Audio.import_audio(model[expanded_index].index, line_no)
+        }
+        export_audio(line_no) => {
+            Audio.export_audio(model[expanded_index].index, line_no)
         }
 
         delete_audio(line_no) => {

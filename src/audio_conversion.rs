@@ -50,6 +50,23 @@ pub async fn any_to_mp3(src: &Path, dst: &Mp3Path) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
+pub async fn mp3_to_any(src: &Mp3Path, dst: &Path) -> Result<(), Box<dyn Error>> {
+    // TODO: make this platform-independent
+    let result = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-i")
+        .arg(&src.as_path())
+        .arg(&dst)
+        .output().await?;
+
+    if !result.status.success() {
+        tokio::fs::remove_file(dst).await.ok(); // the other error is more important
+        return Err(format!("ffmpeg failed.\n\tStdErr: {}", String::from_utf8_lossy(&result.stderr)).into());
+    }
+    
+    Ok(())
+}
+
 pub async fn wav_to_mp3(src: &WavPath, dst: &Mp3Path) -> Result<(), Box<dyn Error>> {
     // TODO: make this platform-independent
     let dst_certain = dst.with_extension("mp3");
