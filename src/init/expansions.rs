@@ -188,7 +188,14 @@ pub fn init_expansions(ui: &AppWindow, topics_model: &Rc<TopicsModel>, project_d
         }
     });
 
-    ui.global::<Mappings>().on_max_expansions_changed(notify_expansion_listeners);
+    ui.global::<Mappings>().on_max_expansions_changed({
+        let nel = notify_expansion_listeners.clone();
+        let expansions_config_model = expansions_config_model.clone();
+        move |new_max| {
+            nel();
+            expansions_config_model.expansion_config.borrow_mut().max_expansions = new_max as usize;
+        }
+    });
 
     expansions_config_model
 }

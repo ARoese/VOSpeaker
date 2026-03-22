@@ -9,7 +9,7 @@ export struct Expansion {
 export global Mappings {
     pure callback expansionNames([Expansion]) -> [string];
     callback expansion_changed(string, string);
-    callback max_expansions_changed();
+    callback max_expansions_changed(int);
 }
 
 export component ExpansionEditor inherits VerticalLayout {
@@ -49,7 +49,7 @@ export component ExpansionsEditor inherits VerticalLayout {
             minimum: 1;
             maximum: 1024;
             value <=> allowed_expansions;
-            changed value => Mappings.max_expansions_changed();
+            changed value => Mappings.max_expansions_changed(self.value);
         }
         padding-bottom: 15px;
     }
