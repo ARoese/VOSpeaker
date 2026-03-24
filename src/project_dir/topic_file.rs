@@ -65,4 +65,14 @@ impl TopicFile {
             
         Ok(self.lines.borrow().clone())
     }
+    
+    pub fn determine_topic_name(p: &Path) -> Option<String> {
+        let topic_name = if let Some(ext) = p.extension() && (ext == "topic" || ext == "txt") {
+            p.with_extension("").file_name()?.to_string_lossy().to_string()
+        } else {
+            p.file_name()?.to_string_lossy().to_string()
+        };
+        
+        Some(topic_name)
+    }
 }

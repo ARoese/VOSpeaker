@@ -75,15 +75,7 @@ pub async fn extract_fomod_topics(fomod_dir: &Path, out_dir: &Path) -> Result<()
                 needs_attn_subdir.join(&mod_name)
             }else{
                 out_dir.join(&mod_name)
-            };
-            
-            let dest_topic_file = if let Some(ext) = dest_topic_file.extension() 
-                && (ext == "txt" || ext == "topic") 
-            {
-                dest_topic_file.with_extension("topic")
-            } else {
-                dest_topic_file.with_added_extension("topic")
-            };
+            }.with_added_extension("topic");
             
             let joined_strings = topic_lines.join("\n");
             tokio::fs::write(dest_topic_file, joined_strings).await?;

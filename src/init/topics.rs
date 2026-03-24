@@ -16,20 +16,34 @@ use tempfile::{NamedTempFile};
 use tokio::sync::mpsc;
 use crate::audio_conversion::{any_to_mp3, mp3_to_any, Mp3Path};
 use crate::project_dir::hashes::ConfigHash;
+use crate::project_dir::topic_file::TopicFile;
 
 pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>, error_sender: &ErrorSender, topic_files: &Vec<PathBuf>, expansions_config_model: &ExpansionsConfigModel) {
     for path in topic_files {
+
+        let Some(topic_name) = TopicFile::determine_topic_name(path) else {
+            spawn_local({
+                let error_sender = error_sender.clone();
+                let path = path.clone();
+                async move {
+                    error_sender.send(make_error(&format!("Error. Cannot deduce topic name for '{path:?}'"))).await.ok();
+                }
+            }).expect("failed to spawn async local");
+            continue;
+        };
+
         let topics_dir = project_dir.topics_path();
-        let topic_name = path.to_string_lossy()
-            .replace(".topic", "")
-            .replace(".txt", "");
-        
         let new_topic_dir = topics_dir.join(
             topic_name.clone() + ".topic.d"
         );
         
         // update if a topic with the same name exists
-        if let Some(existing_topic) = topics_model.iter().find(|topic| topic.get_topic_name().to_string() == topic_name) {
+        if let Some(existing_topic) = topics_model.iter().find(|topic| {
+            let tn = topic.get_topic_name().to_string();
+            //println!("'{tn}' ?= '{topic_name}'");
+            tn == topic_name
+        }) {
+            println!("Updating topic file");
             if let Err(e) = existing_topic.update_topic_file(&path) {
                 let name = existing_topic.get_topic_name();
                 spawn_local({
