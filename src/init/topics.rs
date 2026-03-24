@@ -20,13 +20,16 @@ use crate::project_dir::hashes::ConfigHash;
 pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<Rc<TopicModel>>>, expansions: Rc<RefCell<TopicExpansionConfig>>, substitutions: Rc<RefCell<HashMap<String, String>>>, error_sender: &ErrorSender, topic_files: &Vec<PathBuf>, expansions_config_model: &ExpansionsConfigModel) {
     for path in topic_files {
         let topics_dir = project_dir.topics_path();
-        let topic_prefix = path.file_prefix().expect("It shouldn't be possible to pick an empty path").to_string_lossy().to_string();
+        let topic_name = path.to_string_lossy()
+            .replace(".topic", "")
+            .replace(".txt", "");
+        
         let new_topic_dir = topics_dir.join(
-            topic_prefix.clone() + ".topic.d"
+            topic_name.clone() + ".topic.d"
         );
         
         // update if a topic with the same name exists
-        if let Some(existing_topic) = topics_model.iter().find(|topic| topic.get_topic_name().to_string() == topic_prefix) {
+        if let Some(existing_topic) = topics_model.iter().find(|topic| topic.get_topic_name().to_string() == topic_name) {
             if let Err(e) = existing_topic.update_topic_file(&path) {
                 let name = existing_topic.get_topic_name();
                 spawn_local({
@@ -47,7 +50,7 @@ pub fn add_topic_files(project_dir: &Rc<ProjectDir>, topics_model: &Rc<VecModel<
                         let error_sender = error_sender.clone();
                         async move {
                             error_sender
-                                .send(make_error(&format!("Cannot add topic file '{}': {:?}", topic_prefix, e)))
+                                .send(make_error(&format!("Cannot add topic file '{}': {:?}", topic_name, e)))
                                 .await
                                 .expect("Failed to send Error");
                         }

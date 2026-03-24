@@ -5,7 +5,7 @@ use std::io;
 use std::io::{BufRead, Error};
 use std::path::{Path, PathBuf};
 
-fn read_topic_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
+pub fn read_topic_lines_from_file(path: &Path) -> Result<Vec<String>, Error> {
     let file = OpenOptions::new().read(true).open(path)?;
     let mut reader = io::BufReader::new(file);
 
@@ -24,16 +24,16 @@ fn read_topic_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
         line+=1;
         bytes.clear();
     }
+    
+    Ok(lines)
+}
 
+fn read_raw_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
+    let mut lines = read_topic_lines_from_file(path)?;
     lines.sort_unstable();
     lines.dedup();
 
-    let lines = lines
-        .into_iter()
-        .map(|l| RawTopicLine::new(&l))
-        .collect();
-    
-    Ok(lines)
+    Ok(lines.iter().map(|l| RawTopicLine::new(&l)).collect())
 }
 
 pub struct TopicFile {
@@ -43,7 +43,7 @@ pub struct TopicFile {
 
 impl TopicFile {
     pub fn new(path: &Path) -> Result<TopicFile, Error> {
-        let lines = read_topic_lines_from_file(path)?;
+        let lines = read_raw_lines_from_file(path)?;
         Ok(TopicFile {
             path: path.into(),
             lines: lines.into()
@@ -61,7 +61,8 @@ impl TopicFile {
     pub fn update_topic_file(&self, new_file: &Path) -> Result<Vec<RawTopicLine>, Error> {
         std::fs::copy(new_file, &self.path)?;
 
-        *self.lines.borrow_mut() = read_topic_lines_from_file(&self.path)?;
+        *self.lines.borrow_mut() = read_raw_lines_from_file(&self.path)?;
+            
         Ok(self.lines.borrow().clone())
     }
 }

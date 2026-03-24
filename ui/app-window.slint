@@ -20,6 +20,10 @@ export global Dialogs {
     callback delete_short_voicelines();
 }
 
+export global Tools {
+    callback extract_fomod_topics();
+}
+
 export component AppWindow inherits Window {
     in-out property <[TopicListItem]> topicListModel;
     in-out property <ChatterboxConfig> genConfig;
@@ -59,9 +63,6 @@ export component AppWindow inherits Window {
                     }
                 }
             }
-        }
-        Menu {
-            title: "Tools";
             Menu {
                 title: "Batch Actions";
                 MenuItem {
@@ -69,6 +70,16 @@ export component AppWindow inherits Window {
                     activated => {
                         Dialogs.delete_short_voicelines();
                     }
+                }
+            }
+        }
+
+        Menu {
+            title: "Tools";
+            MenuItem {
+                title: "Extract FOMOD Topics";
+                activated => {
+                    Tools.extract_fomod_topics()
                 }
             }
         }
