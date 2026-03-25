@@ -134,7 +134,10 @@ fn read_valid_file(file: &mut File) -> Result<(usize, HashMap<VOHash, ConfigHash
         true
     };
     if should_wipe {
-        println!("Hash length is invalid. {} expected. Wiping file.", HASH_LEN);
+        if file.metadata()?.len() != 0 {
+            println!("Hash length is invalid. {} expected. Wiping file.", HASH_LEN);
+        }
+        
         file.set_len(0)?;
         file.seek(SeekFrom::Start(0))?;
         file.write_u32::<BigEndian>(HASH_LEN as u32)?;
