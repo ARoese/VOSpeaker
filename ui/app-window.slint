@@ -22,6 +22,7 @@ export global Dialogs {
 
 export global Tools {
     callback extract_fomod_topics();
+    callback extract_fomod_topics_into_project();
     callback verify_fomod();
 }
 
@@ -44,21 +45,21 @@ export component AppWindow inherits Window {
         Menu {
             title: "Project";
             Menu {
-                title: "Export to...";
+                title: "Export";
                 MenuItem {
-                    title: "Folder";
+                    title: "to folder";
                     activated => {
                         Dialogs.show_export_to_folder();
                     }
                 }
                 MenuItem {
-                    title: "DBVO mod";
+                    title: "to DBVO mod";
                     activated => {
                         Dialogs.show_export_to_dbvo();
                     }
                 }
                 MenuItem {
-                    title: "FOMOD";
+                    title: "to FOMOD";
                     activated => {
                         Dialogs.show_export_to_fomod();
                     }
