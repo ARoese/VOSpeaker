@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use crate::init::errors::make_error;
 use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::Determinate;
@@ -5,13 +6,14 @@ use crate::init::{ProgressHandle, ProgressHandleSpawner};
 use crate::project_dir::topic_lines::SpokenTopicLine;
 use crate::{AppWindow, Dialogs, Tools, TopicsModel, UIError};
 use async_compat::Compat;
-use rfd::MessageButtons;
+use rfd::{MessageButtons, MessageLevel};
 use rfd::MessageDialogResult::Yes;
 use slint::{spawn_local, ComponentHandle, Model};
 use std::error::Error;
 use std::rc::Rc;
 use tokio_util::future::FutureExt;
 use crate::extract_fomod::extract_fomod_topics;
+use crate::validate_fomod::{validate_fomod, MissingPath};
 
 fn is_short_dialogue(dialogue: &SpokenTopicLine) -> bool {
     let num_words = dialogue.0.split(" ").count();
@@ -91,6 +93,49 @@ pub fn init_batch_tools(ui: &AppWindow, topics: &Rc<TopicsModel>, phs: &Progress
             spawn_local(compat).expect("Failed to spawn local async task");
         }
     });
+
+    ui.global::<Tools>().on_verify_fomod({
+        let phs = phs.clone();
+        move || {
+            let Some(fomod_dir) = rfd::FileDialog::new()
+                .set_title("Select FOMOD directory")
+                .pick_folder() else {return};
+
+            let ph = phs.spawn();
+
+            let compat = Compat::new(async move {
+                let issues = match validate_fomod(&fomod_dir).await {
+                    Ok(issues) => issues,
+                    Err(e) => {
+                        ph.error_sender.send(make_error(&format!("Failed to validate fomod file: {e}"))).await.expect("Failed to send err");
+                        return;
+                    }
+                };
+
+                if issues.is_empty() {
+                    let _ = rfd::MessageDialog::new()
+                        .set_title("FOMOD is valid")
+                        .set_buttons(MessageButtons::Ok)
+                        .set_level(MessageLevel::Info)
+                        .set_description("No issues were detected in this FOMOD")
+                        .show();
+                    return;
+                }
+
+                let bad_mods = issues.into_iter().map(|e| e.mod_name).collect::<Vec<_>>().join("\n\t");
+                let desc = format!("The following mods reference paths that do not exist:\n\t{bad_mods}");
+                let _ = rfd::MessageDialog::new()
+                    .set_title("FOMOD is not valid")
+                    .set_buttons(MessageButtons::Ok)
+                    .set_level(MessageLevel::Warning)
+                    .set_description(desc)
+                    .show();
+            });
+
+            spawn_local(compat).expect("Failed to spawn local async task");
+        }
+    });
+
 
     Ok(())
 }

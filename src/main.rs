@@ -12,6 +12,7 @@ mod project_dir;
 mod audio_conversion;
 mod project_picker;
 mod extract_fomod;
+mod validate_fomod;
 
 use crate::init::{init_batch_tools, init_filters, ProgressHandleSpawner};
 use crate::models::TopicModel;

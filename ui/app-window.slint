@@ -22,6 +22,7 @@ export global Dialogs {
 
 export global Tools {
     callback extract_fomod_topics();
+    callback verify_fomod();
 }
 
 export component AppWindow inherits Window {
@@ -80,6 +81,12 @@ export component AppWindow inherits Window {
                 title: "Extract FOMOD Topics";
                 activated => {
                     Tools.extract_fomod_topics()
+                }
+            }
+            MenuItem {
+                title: "Verify FOMOD";
+                activated => {
+                    Tools.verify_fomod()
                 }
             }
         }
