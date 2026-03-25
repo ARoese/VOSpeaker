@@ -4,19 +4,17 @@ use tokio::fs::read_dir;
 use crate::project_dir::topic_file::read_topic_lines_from_file;
 
 fn is_topic_file(file_name: &str) -> bool {
-    if file_name.contains(".txt") && file_name.contains("topic") {
+    let file_name = file_name.to_lowercase();
+    if file_name.contains(".txt") || file_name.contains(".esp.txt") {
         return true;
-    }
-
-    if file_name.contains(".esp.txt") {
-        return true
     }
 
     false
 }
 
 fn topic_needs_attn(file_name: &str) -> bool {
-    for marker in ["DBVO", "- READ -", "- READ", "READ -"] {
+    let file_name = file_name.to_uppercase();
+    for marker in ["DBVO", "- READ -", "- READ", "READ -", "NO TOPIC FILE"] {
         if file_name.contains(marker) {
             return true
         }
