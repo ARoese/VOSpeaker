@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use crate::Error;
 use std::path::{Path, PathBuf};
 use encoding_rs_io::{DecodeReaderBytes, DecodeReaderBytesBuilder};
-use elementtree::Element;
+use elementtree::{Element, WriteOptions};
 
 #[derive(Debug)]
 pub struct MissingPath {
@@ -28,44 +28,61 @@ pub fn collect_paths_from_plugin(plugin: &Element) -> HashSet<PathBuf> {
     return paths
 }
 
-pub fn collect_plugin_elements(root: &Element) -> Vec<&Element> {
-    let mut stack = vec![root];
+pub fn collect_plugin_elements(root: &Element) -> Vec<(&Element, &Element)> {
+    let mut stack = root.children().into_iter().map(|child| {(root, child)}).collect::<Vec<_>>();
     let mut ret = vec![];
 
-    while let Some(element) = stack.pop() {
+    while let Some((parent, element)) = stack.pop() {
         if element.tag().name() == "plugin" {
-            ret.push(element);
+            ret.push((parent, element));
         }else{
-            stack.extend(element.children().into_iter());
+            stack.extend(element.children().into_iter().map(|child| {(element, child)}));
         }
     }
 
     ret
 }
 
-pub async fn validate_fomod(fomod_path: &Path) -> Result<Vec<MissingPath>, Box<dyn Error>> {
+fn validate_recursively(parent: &mut Element, fomod_path: &Path) -> Vec<MissingPath> {
+    let mut issues = vec![];
+
+    parent.retain_children_mut(|child| {
+        if child.tag().name() != "plugin" { // recurse until a plugin is found
+            issues.extend(validate_recursively(child, fomod_path));
+            return true;
+        }
+
+        let Some(mod_name) = child.get_attr("name") else { return true };
+
+        let mut is_valid_plugin = true;
+        for path in collect_paths_from_plugin(child) {
+            let full_path = fomod_path.join(&path);
+
+            if !full_path.exists() {
+                issues.push(MissingPath {mod_name: mod_name.to_string(), path});
+                is_valid_plugin = false;
+            }
+        }
+
+        return is_valid_plugin;
+    });
+
+    issues
+}
+
+/// returns (root, issues)
+/// where root is a valid XML FOMOD tree, and issues is all the issues that were resolved
+pub async fn validate_fomod(fomod_path: &Path) -> Result< (Element, Vec<MissingPath>), Box<dyn Error>> {
     let module_config_path = fomod_path.join("fomod").join("ModuleConfig.xml");
 
     let fomod_module_config = tokio::fs::read(&module_config_path).await?;
     let reader = DecodeReaderBytesBuilder::new()
         .build(fomod_module_config.as_slice());
     
-    let root = Element::from_reader(reader)?;
-    let mut issues = vec![];
-    'plugin: for plugin in collect_plugin_elements(&root) {
-        let Some(mod_name) = plugin.get_attr("name") else { continue };
-        let paths = collect_paths_from_plugin(plugin);
-
-        for path in paths {
-            let full_path = fomod_path.join(&path);
-            if !full_path.exists() {
-                issues.push(MissingPath {mod_name: mod_name.to_string(), path});
-                continue 'plugin;
-            }
-        }
-    }
-
-    Ok(issues)
+    let mut root = Element::from_reader(reader)?;
+    let issues = validate_recursively(&mut root, fomod_path);
+    
+    Ok((root, issues))
 }
 
 #[cfg(test)]

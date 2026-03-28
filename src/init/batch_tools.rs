@@ -6,11 +6,12 @@ use crate::init::{ProgressHandle, ProgressHandleSpawner};
 use crate::project_dir::topic_lines::SpokenTopicLine;
 use crate::{AppWindow, Dialogs, Tools, TopicsModel, UIError};
 use async_compat::Compat;
-use rfd::{MessageButtons, MessageLevel};
+use rfd::{MessageButtons, MessageDialogResult, MessageLevel};
 use rfd::MessageDialogResult::Yes;
 use slint::{spawn_local, ComponentHandle, Model};
 use std::error::Error;
 use std::rc::Rc;
+use elementtree::WriteOptions;
 use tokio_util::future::FutureExt;
 use crate::extract_fomod::extract_fomod_topics;
 use crate::validate_fomod::{validate_fomod, MissingPath};
@@ -104,7 +105,7 @@ pub fn init_batch_tools(ui: &AppWindow, topics: &Rc<TopicsModel>, phs: &Progress
             let ph = phs.spawn();
 
             let compat = Compat::new(async move {
-                let issues = match validate_fomod(&fomod_dir).await {
+                let (root, issues) = match validate_fomod(&fomod_dir).await {
                     Ok(issues) => issues,
                     Err(e) => {
                         ph.error_sender.send(make_error(&format!("Failed to validate fomod file: {e}"))).await.expect("Failed to send err");
@@ -121,15 +122,42 @@ pub fn init_batch_tools(ui: &AppWindow, topics: &Rc<TopicsModel>, phs: &Progress
                         .show();
                     return;
                 }
-
+                
+                let issues = {
+                    let mut issues = issues;
+                    issues.sort_by(|lhs, rhs| lhs.mod_name.cmp(&rhs.mod_name));
+                    issues.dedup_by(|lhs, rhs| lhs.mod_name == rhs.mod_name);
+                    issues
+                };
+                
                 let bad_mods = issues.into_iter().map(|e| e.mod_name).collect::<Vec<_>>().join("\n\t");
-                let desc = format!("The following mods reference paths that do not exist:\n\t{bad_mods}");
-                let _ = rfd::MessageDialog::new()
+                let desc = format!("The following mods reference paths that do not exist:\n\t{bad_mods}\n\nWould you like to write a new ModuleConfig.xml.fixed that does not have these mods?");
+                let choice = rfd::MessageDialog::new()
                     .set_title("FOMOD is not valid")
-                    .set_buttons(MessageButtons::Ok)
+                    .set_buttons(MessageButtons::YesNo)
                     .set_level(MessageLevel::Warning)
                     .set_description(desc)
                     .show();
+                
+                if choice != Yes {
+                    return;
+                }
+                
+                let mut writer = vec![];
+                if let Err(e) = root.to_writer_with_options(
+                    &mut writer,
+                    WriteOptions::new()
+                        .set_perform_indent(true)
+                ) {
+                    ph.error_sender.send(make_error(&format!("Failed to write FOMOD ModuleConfig to buffer {e}")))
+                        .await.expect("Failed to send err");
+                }
+
+                let fixed_module_config_path = fomod_dir.join("fomod").join("ModuleConfig.xml.fixed");
+                if let Err(e) = tokio::fs::write(&fixed_module_config_path, &writer).await {
+                    ph.error_sender.send(make_error(&format!("Failed to write FOMOD ModuleConfig to file {e}")))
+                        .await.expect("Failed to send err");
+                }
             });
 
             spawn_local(compat).expect("Failed to spawn local async task");
