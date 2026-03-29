@@ -1,13 +1,11 @@
 use crate::project_dir::topic_lines::RawTopicLine;
 use std::cell::RefCell;
 use std::fs::OpenOptions;
-use std::io;
-use std::io::{BufRead, Error};
+use std::io::{BufRead, BufReader, Error, Read};
 use std::path::{Path, PathBuf};
 
-pub fn read_topic_lines_from_file(path: &Path) -> Result<Vec<String>, Error> {
-    let file = OpenOptions::new().read(true).open(path)?;
-    let mut reader = io::BufReader::new(file);
+pub fn read_topic_lines_from_file(reader: impl Read, debug_path: &str) -> Result<Vec<String>, Error> {
+    let mut reader = BufReader::new(reader);
 
     let mut bytes: Vec<u8> = Vec::new();
     let mut lines: Vec<String> = Vec::new();
@@ -19,7 +17,7 @@ pub fn read_topic_lines_from_file(path: &Path) -> Result<Vec<String>, Error> {
                 .replace("\n", "");
             lines.push(clean_line);
         }else{
-            eprintln!("'{}' Line {line} is not valid utf8. It will be ignored", path.to_string_lossy());
+            eprintln!("'{}' Line {line} is not valid utf8. It will be ignored", debug_path);
         }
         line+=1;
         bytes.clear();
@@ -29,7 +27,8 @@ pub fn read_topic_lines_from_file(path: &Path) -> Result<Vec<String>, Error> {
 }
 
 fn read_raw_lines_from_file(path: &Path) -> Result<Vec<RawTopicLine>, Error> {
-    let mut lines = read_topic_lines_from_file(path)?;
+    let file = OpenOptions::new().read(true).open(path)?;
+    let mut lines = read_topic_lines_from_file(file, &path.to_string_lossy())?;
     lines.sort_unstable();
     lines.dedup();
 

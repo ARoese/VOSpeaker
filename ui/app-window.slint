@@ -21,7 +21,8 @@ export global Dialogs {
 }
 
 export global Tools {
-    callback extract_fomod_topics();
+    callback extract_fomod_topics_from_dir();
+    callback extract_fomod_topics_from_zip();
     callback extract_fomod_topics_into_project();
     callback verify_fomod();
 }
@@ -78,12 +79,22 @@ export component AppWindow inherits Window {
 
         Menu {
             title: "Tools";
-            MenuItem {
+            Menu {
                 title: "Extract FOMOD Topics";
-                activated => {
-                    Tools.extract_fomod_topics()
+                MenuItem {
+                    title: "from ZIP";
+                    activated => {
+                        Tools.extract_fomod_topics_from_zip()
+                    }
+                }
+                MenuItem {
+                    title: "from DIR";
+                    activated => {
+                        Tools.extract_fomod_topics_from_dir()
+                    }
                 }
             }
+
             MenuItem {
                 title: "Verify FOMOD";
                 activated => {

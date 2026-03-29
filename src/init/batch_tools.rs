@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use crate::init::errors::make_error;
 use crate::init::ProgressState::{Done, Inflight};
 use crate::init::ProgressVal::Determinate;
@@ -6,7 +5,7 @@ use crate::init::{ProgressHandle, ProgressHandleSpawner};
 use crate::project_dir::topic_lines::SpokenTopicLine;
 use crate::{AppWindow, Dialogs, Tools, TopicsModel, UIError};
 use async_compat::Compat;
-use rfd::{MessageButtons, MessageDialogResult, MessageLevel};
+use rfd::{MessageButtons, MessageLevel};
 use rfd::MessageDialogResult::Yes;
 use slint::{spawn_local, ComponentHandle, Model};
 use std::error::Error;
@@ -14,7 +13,7 @@ use std::rc::Rc;
 use elementtree::WriteOptions;
 use tokio_util::future::FutureExt;
 use crate::extract_fomod::extract_fomod_topics;
-use crate::validate_fomod::{validate_fomod, MissingPath};
+use crate::validate_fomod::validate_fomod;
 
 fn is_short_dialogue(dialogue: &SpokenTopicLine) -> bool {
     let num_words = dialogue.0.split(" ").count();
@@ -71,7 +70,7 @@ pub fn init_batch_tools(ui: &AppWindow, topics: &Rc<TopicsModel>, phs: &Progress
         }
     });
 
-    ui.global::<Tools>().on_extract_fomod_topics({
+    ui.global::<Tools>().on_extract_fomod_topics_from_dir({
         let phs = phs.clone();
         move || {
             let Some(fomod_dir) = rfd::FileDialog::new()
@@ -91,6 +90,31 @@ pub fn init_batch_tools(ui: &AppWindow, topics: &Rc<TopicsModel>, phs: &Progress
                 }
             });
             
+            spawn_local(compat).expect("Failed to spawn local async task");
+        }
+    });
+
+    ui.global::<Tools>().on_extract_fomod_topics_from_zip({
+        let phs = phs.clone();
+        move || {
+            let Some(fomod_dir) = rfd::FileDialog::new()
+                .set_title("Select FOMOD zip")
+                .add_filter("zip Files", &["zip"])
+                .pick_file() else {return};
+
+            let Some(extract_output) = rfd::FileDialog::new()
+                .set_title("Select output directory")
+                .pick_folder() else {return};
+
+            let ph = phs.spawn();
+
+            let compat = Compat::new(async move {
+                if let Err(e) = extract_fomod_topics(&fomod_dir, &extract_output).await {
+                    ph.error_sender.send(make_error(&format!("Failed to extract FOMOD topics: {e}")))
+                        .await.expect("Failed to send err");
+                }
+            });
+
             spawn_local(compat).expect("Failed to spawn local async task");
         }
     });
