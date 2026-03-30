@@ -172,8 +172,6 @@ impl RawTopicLine {
     }
 }
 
-// TODO: This has problems if there is a period. Ex. "Some dialogue (something that should be removed)."
-// TODO: This has problems with multiple sets of parens Ex. "I'll do it. (Cast turn Undead) (15 Gold)"
 fn without_leading_trailing_parens(line: &str) -> &str {
     let start_parens_regex = regex!(r"^(\(.*?\)).*");
     let end_parens_regex = regex!(r".*(\(.*?\))$");
